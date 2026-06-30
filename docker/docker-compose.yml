@@ -1,0 +1,26 @@
+# Rover ROS 2 runtime. Usage (run from the Pi, inside this docker/ directory):
+#
+#   docker compose build                                   # build the image
+#   docker compose run --rm rover colcon build --symlink-install   # build the workspace (once / after edits to setup)
+#   docker compose up -d                                   # start the base driver
+#   docker compose exec rover \
+#       ros2 run teleop_twist_keyboard teleop_twist_keyboard --ros-args -p repeat_rate:=15.0
+#   docker compose down                                    # stop everything (Pi OS untouched)
+services:
+  rover:
+    build: .
+    image: ugv-rover:jazzy
+    container_name: rover
+    network_mode: host          # ROS 2 DDS discovery over localhost / the LAN
+    ipc: host                   # faster shared-memory DDS transport
+    devices:
+      - "/dev/serial0:/dev/serial0"   # ESP32 driver board UART (see docs/PI_SETUP.md if this errors)
+    volumes:
+      - ../ugv_ws:/ros2_ws            # live-edit the colcon workspace from the Mac
+    environment:
+      - ROS_DOMAIN_ID=0
+    stdin_open: true            # teleop needs a live stdin...
+    tty: true                   # ...and a TTY to read keypresses
+    restart: "no"
+    # Default process: bring up the base driver. teleop is attached separately via `exec`.
+    command: ros2 launch ugv_bringup rover.launch.py

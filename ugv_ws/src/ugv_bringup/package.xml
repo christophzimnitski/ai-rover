@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>ugv_bringup</name>
+  <version>0.1.0</version>
+  <description>Launch files and parameters to bring up the Waveshare UGV Rover.</description>
+  <maintainer email="145026135+christophzimnitski@users.noreply.github.com">Christoph Zimnitski</maintainer>
+  <license>MIT</license>
+
+  <exec_depend>ugv_driver</exec_depend>
+  <exec_depend>teleop_twist_keyboard</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

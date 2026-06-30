@@ -1,0 +1,14 @@
+ugv_driver:
+  ros__parameters:
+    # Serial link to the ESP32 General Driver Board.
+    serial_port: "/dev/serial0"   # if the container errors, try the resolved target
+    baud: 115200                  # (ttyAMA0 / ttyS0 — see docs/PI_SETUP.md)
+
+    # Differential-drive geometry / limits.
+    track_width: 0.13             # m, MEASURE your rover left<->right wheel separation
+    max_wheel_speed: 0.5          # m/s, hard ESP32 limit for the {"T":1} command
+    angular_gain: 1.0             # raise for snappier in-place turns while tuning
+
+    # Safety.
+    cmd_timeout: 0.5              # s, stop if /cmd_vel goes quiet (crash / SSH drop)
+    require_serial: true          # set false to dry-run the node without hardware
