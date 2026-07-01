@@ -34,6 +34,10 @@ services:
       - ROS_DOMAIN_ID=0
     stdin_open: true            # teleop needs a live stdin...
     tty: true                   # ...and a TTY to read keypresses
-    restart: "no"
+    # Autostart on boot: the Docker daemon starts at boot (systemd) and brings this
+    # container back up unless it was explicitly `docker compose stop`ped. So the rover
+    # comes up driving on power-on -- our replacement for the stock app's @reboot crontab.
+    # (Disable that stock crontab entry so it doesn't fight us for the ESP32 UART.)
+    restart: unless-stopped
     # Default process: bring up the base driver. teleop is attached separately via `exec`.
     command: ros2 launch ugv_bringup rover.launch.py
