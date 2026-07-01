@@ -9,9 +9,14 @@ below this node has to change when behavior on top of it changes.
 """
 from __future__ import annotations
 
+import json
+import math
+
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
+from sensor_msgs.msg import BatteryState
+from std_msgs.msg import String
 
 from ugv_driver.serial_link import SerialLink
 
@@ -44,6 +49,10 @@ class UgvDriver(Node):
         self.declare_parameter("min_wheel_speed", 0.0)   # m/s, stiction floor (0 = off)
         self.declare_parameter("cmd_timeout", 0.5)       # s, watchdog -> stop if cmd_vel goes quiet
         self.declare_parameter("require_serial", True)
+        # Telemetry (read path): stream the ESP32's feedback and republish it.
+        self.declare_parameter("telemetry", True)             # read + publish board feedback
+        self.declare_parameter("telemetry_interval_ms", 100)  # ESP32 feedback cadence
+        self.declare_parameter("telemetry_rate", 10.0)        # Hz, ROS publish rate
 
         port = self.get_parameter("serial_port").value
         baud = int(self.get_parameter("baud").value)
@@ -67,9 +76,60 @@ class UgvDriver(Node):
         # Watchdog: halt the rover if /cmd_vel stops arriving (node crash, SSH drop, ...).
         self.create_timer(self._timeout / 2.0, self._watchdog)
 
+        self._setup_telemetry()
+
         self.get_logger().info(
             f"ugv_driver up: port={port} track_width={self._track}m "
             f"max={self._max}m/s min={self._min}m/s timeout={self._timeout}s")
+
+    def _setup_telemetry(self) -> None:
+        """Read the ESP32 feedback stream and republish it as ROS topics.
+
+        /rover/telemetry (std_msgs/String)   -- the raw board JSON, everything the
+                                                 dashboard needs (wheel speeds, IMU, ...).
+        /battery         (sensor_msgs/BatteryState) -- typed voltage for low-battery logic.
+        """
+        self._last_telem = None
+        if not bool(self.get_parameter("telemetry").value):
+            return
+        if not self._link.connected:
+            self.get_logger().warning("telemetry enabled but serial not connected; skipping.")
+            return
+
+        self._telem_pub = self.create_publisher(String, "rover/telemetry", 10)
+        self._battery_pub = self.create_publisher(BatteryState, "battery", 10)
+
+        interval = int(self.get_parameter("telemetry_interval_ms").value)
+        rate = float(self.get_parameter("telemetry_rate").value)
+        started = self._link.start_telemetry(interval_ms=interval, on_data=self._on_telem)
+        if not started:
+            self.get_logger().warning("could not start ESP32 telemetry stream.")
+            return
+        # Republish on a ROS timer (decoupled from the serial cadence, and on the
+        # executor thread so we never publish from the reader thread).
+        self.create_timer(1.0 / max(rate, 1.0), self._publish_telemetry)
+        self.get_logger().info(
+            f"telemetry: streaming ESP32 feedback @ {interval}ms -> "
+            f"/rover/telemetry + /battery @ {rate}Hz")
+
+    def _on_telem(self, data: dict) -> None:
+        # Called from the serial reader thread: just stash the latest (atomic assign).
+        self._last_telem = data
+
+    def _publish_telemetry(self) -> None:
+        data = self._last_telem
+        if not data:
+            return
+        self._telem_pub.publish(String(data=json.dumps(data)))
+        v = data.get("v")
+        if isinstance(v, (int, float)):
+            msg = BatteryState()
+            msg.header.stamp = self.get_clock().now().to_msg()
+            msg.voltage = float(v)
+            msg.percentage = math.nan
+            msg.present = True
+            msg.power_supply_status = BatteryState.POWER_SUPPLY_STATUS_UNKNOWN
+            self._battery_pub.publish(msg)
 
     def _on_cmd_vel(self, msg: Twist) -> None:
         # Differential-drive kinematics: Twist (m/s, rad/s) -> left/right wheel m/s.
