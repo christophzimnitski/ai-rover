@@ -20,8 +20,16 @@ services:
       # stock Waveshare app hardcodes ttyAMA0 for the Pi 5 for exactly this reason. Map the
       # real device to a stable in-container path so the driver's serial_port stays "/dev/serial0".
       - "/dev/ttyAMA0:/dev/serial0"    # ESP32 driver board UART (Pi 5 GPIO14/15 PL011)
+    # Gamepad: expose the host's input devices so joy_node can open /dev/input/js0.
+    # Bind-mounting the whole /dev/input dir (rather than a fixed js0/event5) keeps
+    # working when the dongle re-enumerates or the device index shifts. The cgroup
+    # rule grants access to the input subsystem (char major 13 = js*/event*/mice);
+    # without it Docker's default device cgroup blocks the nodes even when mounted.
+    device_cgroup_rules:
+      - "c 13:* rmw"
     volumes:
       - ../ugv_ws:/ros2_ws            # live-edit the colcon workspace from the Mac
+      - /dev/input:/dev/input         # gamepad devices (js0 etc.) for joy_node
     environment:
       - ROS_DOMAIN_ID=0
     stdin_open: true            # teleop needs a live stdin...

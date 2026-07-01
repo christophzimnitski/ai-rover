@@ -5,7 +5,10 @@ ugv_driver:
     baud: 115200                  # Pi 5: ESP32 is on host /dev/ttyAMA0 (NOT serial0 -> ttyAMA10)
 
     # Differential-drive geometry / limits.
-    track_width: 0.175            # m, measured left<->right wheel centre-to-centre
+    track_width: 0.175            # m, distance between the two treads' CENTRELINES
+                                  # (contact-patch centres) = the kinematic track for
+                                  # diff-drive. NOT the 0.13 m inner gap between treads
+                                  # (13 gap + 4.5 tread width = 17.5 centre-to-centre).
     max_wheel_speed: 0.5          # m/s, hard ESP32 limit for the {"T":1} command
     angular_gain: 1.0             # raise for snappier in-place turns while tuning
 

@@ -1,0 +1,51 @@
+# Gamepad teleop: /dev/input/js0 -> joy_node -> /joy -> teleop_twist_joy -> /cmd_vel.
+# The ugv_driver turns /cmd_vel into ESP32 wheel commands, so nothing below /cmd_vel
+# changes when you swap controllers -- only this file does.
+#
+# SWAPPING CONTROLLERS: the axis/button *indices* below depend on the specific pad
+# and how the kernel/SDL2 enumerate it. To find the right values for a new controller:
+#   docker compose exec rover /entrypoint.sh ros2 run joy joy_node        # publishes /joy
+#   docker compose exec rover /entrypoint.sh ros2 topic echo /joy         # watch indices
+# Move ONE control at a time and note which axis/button entry changes:
+#   - push LEFT stick fully UP    -> that axis index = axis_linear.x  (note the sign!)
+#   - push RIGHT stick fully RIGHT-> that axis index = axis_angular.yaw
+#   - press your intended deadman -> that button index = enable_button
+# Then update the indices here and `docker compose restart rover` (no rebuild needed).
+#
+# Current values: GameSir Nova Lite via 2.4GHz USB dongle ("Zikway HID gamepad"),
+# Xinput-style layout (js0: axes 0/1 = left stick, 2/3 = right stick, 4/5 = triggers).
+
+joy_node:
+  ros__parameters:
+    device_id: 0          # 0 = /dev/input/js0 (first joystick)
+    deadzone: 0.10        # fraction of range treated as centre -> exact 0.0 (kills stop-lag)
+    autorepeat_rate: 20.0 # Hz; republish /joy even when idle so /cmd_vel keeps feeding
+                          # the driver watchdog (cmd_timeout 0.5s) while the deadman is held
+
+teleop_twist_joy_node:
+  ros__parameters:
+    # --- Deadman / turbo -------------------------------------------------------
+    require_enable_button: true   # SAFETY: rover only moves while the deadman is held
+    enable_button: 6              # LB (confirmed via raw js capture: LB = button 6 on this pad)
+    enable_turbo_button: -1       # turbo disabled: RB index unknown on this pad (LB=6 is non-standard).
+                                  # To enable: capture RB's index, set it here, restore turbo scales' sign.
+
+    # --- Linear (forward/back on left stick Y) ---------------------------------
+    # Capture: left stick fully UP (forward) drives axis 1 NEGATIVE, so the scale is
+    # negated -> up-stick (negative axis) * negative scale = positive linear.x = forward.
+    axis_linear:
+      x: 1                        # left stick Y (confirmed)
+    scale_linear:
+      x: -0.25                    # m/s at full stick, normal mode (negated: up = forward)
+    scale_linear_turbo:
+      x: -0.50                    # m/s at full stick, turbo (matches max_wheel_speed 0.5)
+
+    # --- Angular (turn on right stick X) ---------------------------------------
+    # Capture: right stick fully RIGHT drives axis 2 POSITIVE. Right turn = negative
+    # angular.z (ROS: +z = CCW/left), so the scale is negated -> right-stick = right-turn.
+    axis_angular:
+      yaw: 2                      # right stick X (confirmed)
+    scale_angular:
+      yaw: -1.2                   # rad/s at full stick, normal mode (negated: right = right-turn)
+    scale_angular_turbo:
+      yaw: -2.4                   # rad/s at full stick, turbo
