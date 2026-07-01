@@ -1,13 +1,19 @@
 ugv_driver:
   ros__parameters:
     # Serial link to the ESP32 General Driver Board.
-    serial_port: "/dev/serial0"   # if the container errors, try the resolved target
-    baud: 115200                  # (ttyAMA0 / ttyS0 — see docs/PI_SETUP.md)
+    serial_port: "/dev/serial0"   # in-container path; compose maps host /dev/ttyAMA0 -> here
+    baud: 115200                  # Pi 5: ESP32 is on host /dev/ttyAMA0 (NOT serial0 -> ttyAMA10)
 
     # Differential-drive geometry / limits.
-    track_width: 0.13             # m, MEASURE your rover left<->right wheel separation
+    track_width: 0.175            # m, measured left<->right wheel centre-to-centre
     max_wheel_speed: 0.5          # m/s, hard ESP32 limit for the {"T":1} command
     angular_gain: 1.0             # raise for snappier in-place turns while tuning
+
+    # Stiction compensation: overcome static friction at low speed. Any NON-ZERO wheel
+    # command below this magnitude is bumped up to it (sign preserved); exact zero stays
+    # zero. Fixes "won't turn at low speed" without you having to floor the stick. Tune
+    # down toward the point where the wheels just reliably start; 0.0 disables it.
+    min_wheel_speed: 0.10         # m/s
 
     # Safety.
     cmd_timeout: 0.5              # s, stop if /cmd_vel goes quiet (crash / SSH drop)

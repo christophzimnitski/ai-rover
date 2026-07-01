@@ -14,10 +14,12 @@ services:
     network_mode: host          # ROS 2 DDS discovery over localhost / the LAN
     ipc: host                   # faster shared-memory DDS transport
     devices:
-      # On a Raspberry Pi 5 the GPIO UART (GPIO14/15 to the ESP32) is /dev/ttyAMA10, with
-      # /dev/serial0 a symlink to it. Map the REAL device to a stable in-container path so the
-      # driver's serial_port can stay "/dev/serial0" regardless of host UART naming.
-      - "/dev/ttyAMA10:/dev/serial0"   # ESP32 driver board UART (Pi 5 RP1 UART)
+      # On a Raspberry Pi 5 the ESP32 is on the GPIO14/15 PL011 UART = /dev/ttyAMA0
+      # (enabled by dtparam=uart0=on). WARNING: /dev/serial0 is aliased to /dev/ttyAMA10 on
+      # this Pi 5 — a DIFFERENT, unconnected UART; writing to it silently goes nowhere. The
+      # stock Waveshare app hardcodes ttyAMA0 for the Pi 5 for exactly this reason. Map the
+      # real device to a stable in-container path so the driver's serial_port stays "/dev/serial0".
+      - "/dev/ttyAMA0:/dev/serial0"    # ESP32 driver board UART (Pi 5 GPIO14/15 PL011)
     volumes:
       - ../ugv_ws:/ros2_ws            # live-edit the colcon workspace from the Mac
     environment:

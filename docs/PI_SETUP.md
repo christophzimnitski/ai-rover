@@ -72,6 +72,10 @@ You're already in the Pi — these make a roaming, headless, vision-running robo
   whose baud rate drifts with CPU clock), we'll add `dtoverlay=disable-bt` to
   `/boot/firmware/config.txt` so the GPIO uses the better PL011 UART. If it points to
   **ttyAMA0**, you're already good. Don't change anything yet — just send me what it shows.
+- **Pi 5 trap:** on this Pi 5, `/dev/serial0` is aliased to `/dev/ttyAMA10`, which is NOT
+  the GPIO14/15 UART the ESP32 is wired to — that one is **`/dev/ttyAMA0`** (enabled by
+  `dtparam=uart0=on`). So on a Pi 5, target `/dev/ttyAMA0` directly, not `serial0`. The
+  stock Waveshare app does the same (it hardcodes `ttyAMA0` when it detects a Pi 5).
 
 **Keep it healthy:**
 - Update once: `sudo apt update && sudo apt full-upgrade -y`, then firmware `sudo rpi-eeprom-update -a`.
