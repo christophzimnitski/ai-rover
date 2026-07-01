@@ -21,3 +21,15 @@ ugv_driver:
     # Safety.
     cmd_timeout: 0.5              # s, stop if /cmd_vel goes quiet (crash / SSH drop)
     require_serial: true          # set false to dry-run the node without hardware
+
+    # Telemetry (read path): stream the ESP32 feedback and republish it as
+    # /rover/telemetry (raw JSON) + /battery (voltage).
+    telemetry: true
+    telemetry_interval_ms: 50     # ESP32 feedback window (board -> Pi). KEEP THIS SHORT:
+                                  #   the ~0.15 m/s wheel-speed QUANTIZATION is a FIRMWARE
+                                  #   limit (fixed internal speed estimate) -- a longer
+                                  #   window does NOT improve resolution and only adds
+                                  #   latency (measured: 20ms->51ms vs 100ms->241ms step
+                                  #   response). Precise low-speed odometry would need raw
+                                  #   encoder COUNTS from the board, not this quantized speed.
+    telemetry_rate: 20.0          # Hz, ROS republish rate for the dashboard (latest value)
