@@ -18,7 +18,10 @@
 joy_node:
   ros__parameters:
     device_id: 0          # 0 = /dev/input/js0 (first joystick)
-    deadzone: 0.10        # fraction of range treated as centre -> exact 0.0 (kills stop-lag)
+    deadzone: 0.15        # fraction of range treated as centre -> exact 0.0. Raised 0.10->0.15 to
+                          # swallow occasional stick DRIFT: min_wheel_speed (0.10) would otherwise
+                          # amplify any leaked drift into a 0.10 m/s creep ("won't stop"). Lower it
+                          # if low-speed fine control suffers.
     autorepeat_rate: 20.0 # Hz; republish /joy even when idle so /cmd_vel keeps feeding
                           # the driver watchdog (cmd_timeout 0.5s) while the deadman is held
 
@@ -26,26 +29,28 @@ teleop_twist_joy_node:
   ros__parameters:
     # --- Deadman / turbo -------------------------------------------------------
     require_enable_button: true   # SAFETY: rover only moves while the deadman is held
-    enable_button: 6              # LB (confirmed via raw js capture: LB = button 6 on this pad)
-    enable_turbo_button: -1       # turbo disabled: RB index unknown on this pad (LB=6 is non-standard).
-                                  # To enable: capture RB's index, set it here, restore turbo scales' sign.
+    enable_button: 8              # DEADMAN = LT: hold the LEFT trigger to drive (button 8 = LT digital)
+    enable_turbo_button: 9        # TURBO = RT: hold the RIGHT trigger for the turbo scales (button 9 = RT digital)
+                                  # (triggers are dual-reported on this pad: LT = axis 5 / button 8, RT = axis 4 / button 9)
 
     # --- Linear (forward/back on left stick Y) ---------------------------------
-    # Capture: left stick fully UP (forward) drives axis 1 NEGATIVE, so the scale is
-    # negated -> up-stick (negative axis) * negative scale = positive linear.x = forward.
+    # Left stick fully UP drives axis 1 NEGATIVE. GROUND-TESTED: a POSITIVE scale gives
+    # up = forward, down = reverse (a negative scale inverted it), so the sign is +.
     axis_linear:
       x: 1                        # left stick Y (confirmed)
     scale_linear:
-      x: -0.25                    # m/s at full stick, normal mode (negated: up = forward)
+      x: 0.25                     # m/s at full stick, normal mode (up = forward)
     scale_linear_turbo:
-      x: -0.50                    # m/s at full stick, turbo (matches max_wheel_speed 0.5)
+      x: 0.50                     # m/s at full stick, turbo (matches max_wheel_speed 0.5)
 
     # --- Angular (turn on right stick X) ---------------------------------------
-    # Capture: right stick fully RIGHT drives axis 2 POSITIVE. Right turn = negative
-    # angular.z (ROS: +z = CCW/left), so the scale is negated -> right-stick = right-turn.
+    # Right stick fully RIGHT drives axis 2 POSITIVE. GROUND-TESTED: a POSITIVE scale gives
+    # right-stick = right turn (a negative scale mirrored it), so the sign is +.
     axis_angular:
       yaw: 2                      # right stick X (confirmed)
     scale_angular:
-      yaw: -1.2                   # rad/s at full stick, normal mode (negated: right = right-turn)
+      yaw: 2.4                    # rad/s at full stick, normal (was 1.2; raised to the old turbo
+                                  #   value per feel -> ~0.21 m/s/wheel = 42% of max wheel speed).
     scale_angular_turbo:
-      yaw: -2.4                   # rad/s at full stick, turbo
+      yaw: 5.7                    # rad/s at full stick, turbo = near-max in-place turn
+                                  #   (5.7 * 0.0875 = 0.499 m/s/wheel ~= max_wheel_speed 0.5).
