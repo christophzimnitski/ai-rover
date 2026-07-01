@@ -22,5 +22,11 @@ setup(
     maintainer_email="145026135+christophzimnitski@users.noreply.github.com",
     description="Launch files and parameters for the Waveshare UGV Rover.",
     license="MIT",
-    entry_points={"console_scripts": []},
+    entry_points={
+        "console_scripts": [
+            # Supervises joy_node: auto-restarts it when the pad sleeps/wakes or the
+            # dongle re-enumerates /dev/input/js0 (see joy_supervisor.py).
+            "joy_supervisor = ugv_bringup.joy_supervisor:main",
+        ],
+    },
 )

@@ -20,13 +20,17 @@ def generate_launch_description() -> LaunchDescription:
         get_package_share_directory("ugv_bringup"), "config", "teleop_joy.yaml")
 
     return LaunchDescription([
-        # Reads /dev/input/js0 and publishes sensor_msgs/Joy on /joy.
+        # joy_supervisor runs joy_node (which reads /dev/input/js0 and publishes /joy)
+        # as a child and AUTO-RESTARTS it when the pad sleeps/wakes or the dongle
+        # re-enumerates js0 -- otherwise joy_node clings to a dead fd and /joy dies
+        # silently (there is no udevd in the container). It passes teleop_joy.yaml
+        # straight through to joy_node, so the mapping/deadzone/autorepeat are unchanged.
         Node(
-            package="joy",
-            executable="joy_node",
-            name="joy_node",
+            package="ugv_bringup",
+            executable="joy_supervisor",
+            name="joy_supervisor",
             output="screen",
-            parameters=[params],
+            parameters=[{"joy_params_file": params, "device_id": 0}],
         ),
         # Maps /joy (sticks/buttons) to geometry_msgs/Twist on /cmd_vel.
         Node(
