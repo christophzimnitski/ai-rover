@@ -1,0 +1,27 @@
+# Off-site check for the rover's ROS-free logic (kinematics + serial link).
+#
+# This is a SEPARATE helper: it runs here on GitHub, never on the Pi, and the rover
+# runtime never imports or depends on it. It needs no ROS, no Docker, and no hardware
+# -- just Python + pyserial -- so it stays fast (~seconds). Delete this file (and the
+# tests/ dir) to remove the checks with zero effect on the robot.
+name: tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dev tools
+        run: python -m pip install --upgrade pip pytest ruff pyserial
+      - name: Lint (ruff)
+        run: ruff check
+      - name: Unit tests (pytest)
+        run: pytest -q

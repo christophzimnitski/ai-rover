@@ -9,8 +9,9 @@
 
   <exec_depend>rclpy</exec_depend>
   <exec_depend>geometry_msgs</exec_depend>
-  <exec_depend>std_msgs</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
+  <!-- full <depend> (not exec_depend) so colcon builds ugv_msgs before this package -->
+  <depend>ugv_msgs</depend>
   <exec_depend>python3-serial</exec_depend>
 
   <test_depend>ament_copyright</test_depend>

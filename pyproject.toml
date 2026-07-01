@@ -1,0 +1,19 @@
+# Dev-tooling config ONLY (pytest + ruff) for the off-site test harness.
+# This is NOT a Python package definition -- there is no [project] table, so
+# colcon/ament never build from it and the rover runtime never sees it. Remove
+# this file together with tests/ and .github/ to drop the checks entirely; the
+# robot is unaffected.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+# Lint the modular foundation (packages) + the test harness. The scripts/ dir holds
+# Pi-side operational/diagnostic helpers with their own compact style -- out of scope.
+extend-exclude = [".venv", "ugv_ws/build", "ugv_ws/install", "ugv_ws/log", "scripts"]
+
+# Keep the linter focused on real defects (pyflakes F + error-class E), not style
+# churn on already-tuned code: undefined names, unused imports, syntax errors.
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]

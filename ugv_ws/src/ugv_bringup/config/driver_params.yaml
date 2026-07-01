@@ -10,7 +10,12 @@ ugv_driver:
                                   # diff-drive. NOT the 0.13 m inner gap between treads
                                   # (13 gap + 4.5 tread width = 17.5 centre-to-centre).
     max_wheel_speed: 0.5          # m/s, hard ESP32 limit for the {"T":1} command
-    angular_gain: 1.0             # raise for snappier in-place turns while tuning
+    angular_gain: 1.0             # KEEP AT 1.0. This scales angular.z BELOW the /cmd_vel
+                                  # seam, so any other value means /cmd_vel is no longer a
+                                  # faithful physical contract (true rad/s) for EVERY
+                                  # publisher -- including future autonomy, which would then
+                                  # silently turn wrong. Tune turn *feel* ABOVE the seam, in
+                                  # teleop_joy.yaml (scale_angular / scale_angular_turbo).
 
     # Stiction compensation: overcome static friction at low speed. Any NON-ZERO wheel
     # command below this magnitude is bumped up to it (sign preserved); exact zero stays
@@ -22,8 +27,8 @@ ugv_driver:
     cmd_timeout: 0.5              # s, stop if /cmd_vel goes quiet (crash / SSH drop)
     require_serial: true          # set false to dry-run the node without hardware
 
-    # Telemetry (read path): stream the ESP32 feedback and republish it as
-    # /rover/telemetry (raw JSON) + /battery (voltage).
+    # Telemetry (read path): stream the ESP32 feedback and republish it as typed
+    # /rover/telemetry (ugv_msgs/Telemetry) + /rover/battery (voltage).
     telemetry: true
     telemetry_interval_ms: 50     # ESP32 feedback window (board -> Pi). KEEP THIS SHORT:
                                   #   the ~0.15 m/s wheel-speed QUANTIZATION is a FIRMWARE

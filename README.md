@@ -1,45 +1,71 @@
 # AI Rover
 
-A Waveshare UGV Rover (Raspberry Pi + ESP32) built on **ROS 2 Jazzy**, driven for now
-with WASD-style teleop, heading toward an untethered robot whose camera recognizes a cat.
+A Waveshare UGV Rover (Raspberry Pi + ESP32) built on **ROS 2 Jazzy**, driven with a
+2.4 GHz gamepad, heading toward an untethered robot whose camera recognizes a cat.
 
 ## How it works
 
 ```
-  MAC (dev + keyboard)            RASPBERRY PI (ROS 2 in Docker)            ESP32 board
-  ────────────────────            ──────────────────────────────            ──────────
-  PyCharm / SSH  ── WiFi ──▶  ugv_driver  ──/dev/serial0 (UART JSON)──▶  motors / PID / IMU
-                               ▲ sub /cmd_vel (Twist)
-                               │
-                          teleop_twist_keyboard  (your WASD keys, over SSH)
+  MAC (dev)                     RASPBERRY PI (ROS 2 in Docker)              ESP32 board
+  ─────────                     ──────────────────────────────             ──────────
+  PyCharm / SSH ── WiFi ──▶  joy_supervisor → joy_node                 motors / PID / IMU
+                             → teleop_twist_joy ─┐                            ▲  │
+                                                 ▼                            │  │ UART
+                             ugv_driver ── /dev/serial0 (JSON) ──────────────┘  │ (JSON)
+                               ▲ sub /cmd_vel (Twist)                           │
+                               └──────── /rover/telemetry + /rover/battery ◀────┘
 ```
 
-The Pi is the brain; the ESP32 actually runs the motors. The Pi controls it by writing
-one tiny JSON line per command over a 115200-baud UART:
+A GameSir gamepad (2.4 GHz USB dongle → `/dev/input/js0`) feeds `joy_node`;
+`teleop_twist_joy` turns sticks into `geometry_msgs/Twist` on `/cmd_vel`. Left stick =
+speed, right stick = direction, **hold LT to move** (deadman), RT = turbo. `joy_supervisor`
+keeps `joy_node` alive across pad sleep/wake and dongle re-enumeration.
+
+The Pi is the brain; the ESP32 runs the motors. `ugv_driver` writes one tiny JSON line
+per command over a 115200-baud UART, and reads the board's feedback back:
 
 ```json
 {"T": 1, "L": 0.4, "R": 0.4}   // left/right wheel speed in m/s, range -0.5..+0.5
 ```
 
-**`/cmd_vel` is the stable seam.** Today a human publishes Twist to it via teleop. Later,
-a cat-following behavior node publishes to the *same* topic — the driver below never changes.
+**`/cmd_vel` is the stable seam.** Today the gamepad publishes Twist to it via teleop.
+Later, a cat-following behavior node publishes to the *same* topic — the driver below
+never changes. The board's feedback (wheel speeds, roll/pitch, voltage) is republished
+as `/rover/telemetry` (typed `ugv_msgs/Telemetry`) + `/rover/battery` for the dashboard
+and low-battery logic.
 
 ## Layout
 
 ```
-ugv_ws/src/ugv_driver/    rclpy node: /cmd_vel -> differential-drive -> serial JSON  (permanent base)
-ugv_ws/src/ugv_bringup/   launch file + driver_params.yaml
+ugv_ws/src/ugv_driver/    rclpy node: /cmd_vel -> diff-drive -> serial JSON, + telemetry read-back
+    kinematics.py         ROS-free Twist->wheels math (unit-tested)
+    serial_link.py        ROS-free ESP32 serial wrapper (command + telemetry)
+ugv_ws/src/ugv_bringup/   launch files, driver/teleop params, joy_supervisor
 docker/                   ROS 2 Jazzy image + compose (runs on Raspberry Pi OS, no reflash)
-scripts/serial_smoketest.py   ROS-free hardware check (use this first)
+scripts/                  dev loop: sync / reload / build / verify / logs (+ serial_smoketest, diag)
+tests/                    off-site pytest suite for the ROS-free logic (never runs on the Pi)
 docs/PI_SETUP.md          one-time Pi setup — START HERE
 docs/COMMANDS.md          day-to-day command cheatsheet
 ```
 
 ## Why Docker?
 
-Not strictly required — but ROS 2 needs Ubuntu-like userland, and the Pi runs Raspberry Pi
-OS. Running ROS 2 Jazzy in a container gets us the modern, scalable foundation **without
-reflashing the Pi**, and `docker compose down` leaves the existing setup untouched.
+ROS 2 needs an Ubuntu-like userland and the Pi runs Raspberry Pi OS. Running ROS 2 Jazzy
+in a container gets us the modern, scalable foundation **without reflashing the Pi**, and
+`docker compose down` leaves the existing setup untouched.
+
+## Dev loop (Mac is the source of truth)
+
+Edit on the Mac → `rsync` to the Pi → run in Docker on the Pi (no ROS on macOS).
+
+- Edited a `.py` or a config `.yaml` → `scripts/reload.sh` (sync + restart)
+- Added a node / message / edited `setup.py`/`package.xml`/launch → `scripts/build.sh`
+- Changed the Dockerfile/compose → `scripts/image.sh` (rebuild), then `scripts/build.sh`
+- Fresh Pi / new SD or SSD (first run) → `scripts/bootstrap.sh` (image + workspace + up)
+- Health check / logs → `scripts/verify.sh` · `scripts/logs.sh`
+
+The `tests/` suite is a separate off-site check (see `.github/workflows/tests.yml`); it runs
+on the Mac / in CI and the rover never depends on it.
 
 ## Getting started
 
@@ -49,7 +75,10 @@ reflashing the Pi**, and `docker compose down` leaves the existing setup untouch
 ## Roadmap
 
 - [x] Project scaffold (driver, Docker, launch, docs)
-- [ ] First light: WASD teleop moves the rover
+- [x] First light: teleop moves the rover
+- [x] Gamepad teleop (analog speed + steering, deadman/turbo, auto-recovery)
+- [x] ESP32 telemetry read-back (typed `/rover/telemetry` + `/rover/battery`)
+- [ ] Web dashboard: camera + live telemetry
 - [ ] `ugv_perception`: camera bring-up + cat detector → publishes detections
 - [ ] `ugv_behavior`: turn detections into `/cmd_vel` (follow the cat)
 ```

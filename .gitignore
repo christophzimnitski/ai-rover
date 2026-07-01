@@ -10,6 +10,10 @@ __pycache__/
 .venv/
 venv/
 
+# Test / lint tooling caches (off-site test harness)
+.pytest_cache/
+.ruff_cache/
+
 # OS / editor
 .DS_Store
 *.swp
