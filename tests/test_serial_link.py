@@ -128,3 +128,46 @@ def test_reopen_respects_thrash_guard():
     link = _dry_link()
     link._last_recover = time.monotonic()   # pretend we just recovered
     assert link._reopen() is False          # too soon -> no reopen attempt
+
+
+# --- generic command path (lights / OLED / heartbeat use this) -------------
+def test_send_writes_arbitrary_frame():
+    link = _dry_link()
+    fake = FakeSerial()
+    link._ser = fake
+
+    link.send({"T": 132, "IO4": 255, "IO5": 0})
+
+    assert _decode(fake)[0] == {"T": 132, "IO4": 255, "IO5": 0}
+
+
+# --- stale-stream recovery escalates: re-arm first, then full re-open -------
+def test_stale_first_rearms_then_reopens():
+    link = _dry_link()
+    fake = FakeSerial()
+    link._ser = fake
+    link._interval_ms = 50
+    link._seen_telem = True
+    link._min_reconnect_interval = 0.0      # no thrash guard in the test
+
+    now = time.monotonic()
+    link._last_rx = now - 10.0              # stream has been quiet for 10s
+
+    # Stage 1: quiet stream + healthy fd -> re-arm only (writes 142 + 131).
+    link._handle_stale(now)
+    assert link.rearms == 1
+    assert link.reconnects == 0
+    frames = _decode(fake)
+    assert {"T": 142, "cmd": 50} in frames
+    assert {"T": 131, "cmd": 1} in frames
+
+    # Stage 2: still no data after the re-arm -> escalate to a full re-open.
+    # (pyserial is absent in CI, so _reopen fails to open a port -- but it must
+    # TRY: the fd is closed and the reconnect path is entered.)
+    link._handle_stale(now + 5.0)
+    assert not fake.is_open                 # old fd was closed by the escalation
+
+
+def test_telemetry_age_unseen_is_negative():
+    link = _dry_link()
+    assert link.telemetry_age == -1.0

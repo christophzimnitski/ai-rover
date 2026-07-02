@@ -25,14 +25,24 @@ The Pi is the brain; the ESP32 runs the motors. `ugv_driver` writes one tiny JSO
 per command over a 115200-baud UART, and reads the board's feedback back:
 
 ```json
-{"T": 1, "L": 0.4, "R": 0.4}   // left/right wheel speed in m/s, range -0.5..+0.5
+{"T": 1, "L": 0.4, "R": 0.4}   // left/right wheel command, range -0.5..+0.5
 ```
+
+The stock firmware maps that command **open-loop to PWM** (see `docs/FIRMWARE.md`), so
+the driver closes the speed loop itself: a slow per-wheel trim (`wheel_trim`) compares
+the board's encoder feedback with the command and nudges the output until commanded
+m/s is physically true — on tile, carpet, anywhere (this also removes the old
+stick-then-lurch behavior on high-friction surfaces).
 
 **`/cmd_vel` is the stable seam.** Today the gamepad publishes Twist to it via teleop.
 Later, a cat-following behavior node publishes to the *same* topic — the driver below
-never changes. The board's feedback (wheel speeds, roll/pitch, voltage) is republished
-as `/rover/telemetry` (typed `ugv_msgs/Telemetry`) + `/rover/battery` for the dashboard
-and low-battery logic.
+never changes. The dashboard's on-screen joystick publishes `/web_cmd_vel`, a secondary
+input the driver only accepts while `/cmd_vel` is quiet (the gamepad always wins).
+The board's feedback (wheel speeds, attitude, voltage) is republished as
+`/rover/telemetry` (typed `ugv_msgs/Telemetry`) + `/rover/battery`, link health as
+`/rover/link`. The driver also exposes the board's accessories — `/rover/lights`
+(headlights), `/rover/oled` (status display), `/rover/estop` (software e-stop latch) —
+and arms the firmware's own heartbeat so the board halts itself if the Pi stack dies.
 
 ## Layout
 
@@ -44,8 +54,10 @@ ugv_ws/src/ugv_bringup/   launch files, driver/teleop params, joy_supervisor
 docker/                   ROS 2 Jazzy image + compose (runs on Raspberry Pi OS, no reflash)
 scripts/                  dev loop: sync / reload / build / verify / logs (+ serial_smoketest, diag)
 tests/                    off-site pytest suite for the ROS-free logic (never runs on the Pi)
+webapp/                   zero-dependency dashboard (video, telemetry, drive pad, lights, e-stop)
 docs/PI_SETUP.md          one-time Pi setup — START HERE
 docs/COMMANDS.md          day-to-day command cheatsheet
+docs/FIRMWARE.md          what the ESP32 firmware really does (open-loop PWM, IMU state, T-codes)
 ```
 
 ## Why Docker?
@@ -78,7 +90,8 @@ on the Mac / in CI and the rover never depends on it.
 - [x] First light: teleop moves the rover
 - [x] Gamepad teleop (analog speed + steering, deadman/turbo, auto-recovery)
 - [x] ESP32 telemetry read-back (typed `/rover/telemetry` + `/rover/battery`)
-- [ ] Web dashboard: camera + live telemetry
-- [ ] `ugv_perception`: camera bring-up + cat detector → publishes detections
+- [x] Web dashboard: camera + live telemetry + drive pad / lights / OLED / e-stop
+- [x] Pi-side speed loop (`wheel_trim`) over the open-loop firmware
+- [ ] Reflash `ugv_base_general` → trustworthy IMU (roll/pitch/yaw), then `IMU_TRUSTED=true`
+- [ ] `ugv_perception`: cat detector → publishes detections (boxes onto the dashboard overlay)
 - [ ] `ugv_behavior`: turn detections into `/cmd_vel` (follow the cat)
-```

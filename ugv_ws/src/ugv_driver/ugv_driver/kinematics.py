@@ -42,3 +42,57 @@ def twist_to_wheels(linear_x: float, angular_z: float, track_width: float,
     left = apply_min(clamp(linear_x - angular_z * half, max_speed), min_speed)
     right = apply_min(clamp(linear_x + angular_z * half, max_speed), min_speed)
     return left, right
+
+
+class SpeedTrim:
+    """Slow per-wheel integral trim: make the commanded speed physically true.
+
+    WHY. The stock ESP32 firmware maps {"T":1,"L":x} OPEN-LOOP to motor PWM
+    (x*512, saturating at 255) -- "m/s" in, throttle out. So the same command
+    gives different real speeds on tile vs carpet, and at low commands the rover
+    sticks (static friction) until the operator pushes harder, then lurches.
+    The board DOES report real encoder speed back (quantized ~0.15 m/s at the
+    50ms window), which is enough signal to close the loop up here.
+
+    HOW. An integrator per wheel nudges the outgoing command until the (EMA-
+    filtered) measured speed matches the commanded speed. Pure I-control on top
+    of a feedforward passthrough: output = cmd + trim. Slow by design -- it
+    corrects surface/stiction bias within ~a second; it is not a fast servo.
+    The trim is clamped (anti-windup) and reset whenever the command is zero or
+    flips sign, so 'stop' is always exactly stop and reversals don't inherit a
+    stale boost. ROS-free and pure so it is unit-testable (tests/ off-site).
+    """
+
+    def __init__(self, ki: float = 1.2, trim_limit: float = 0.25,
+                 meas_alpha: float = 0.35) -> None:
+        self.ki = float(ki)                  # 1/s, integral gain
+        self.limit = float(trim_limit)       # max |trim| added to a command
+        self.alpha = float(meas_alpha)       # EMA weight for the noisy measurement
+        self._trim = 0.0
+        self._meas = 0.0
+        self._sign = 0                       # sign of the last non-zero command
+
+    def reset(self) -> None:
+        self._trim = 0.0
+        self._meas = 0.0
+        self._sign = 0
+
+    def update(self, cmd: float, measured: float, dt: float) -> float:
+        """One control tick: return the trimmed command for wheel speed `cmd`.
+
+        `measured` is the board-reported wheel speed (quantized is fine), `dt`
+        the time since the previous tick in seconds.
+        """
+        if cmd == 0.0:
+            self.reset()                     # stop stays stop, immediately
+            return 0.0
+        sign = 1 if cmd > 0.0 else -1
+        if sign != self._sign:
+            self._trim = 0.0                 # direction change: drop stale boost
+            self._meas = 0.0
+            self._sign = sign
+        self._meas += self.alpha * (measured - self._meas)
+        if 0.0 < dt < 0.5:                   # ignore silly gaps (paused stream)
+            self._trim += self.ki * (cmd - self._meas) * dt
+            self._trim = clamp(self._trim, self.limit)
+        return cmd + self._trim

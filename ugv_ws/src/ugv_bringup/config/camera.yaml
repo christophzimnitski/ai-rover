@@ -28,3 +28,8 @@
     frame_id: "camera"
     camera_name: "emeet_c950"
     camera_info_url: ""
+    # The dashboard streams /camera/image_raw/compressed (encoded ONCE here, shared by
+    # every viewer) instead of having web_video_server re-encode per client -- that
+    # double-transcode was ~45% of a core and most of the video lag. Quality 60 halves
+    # the frame size vs the default 95 with no visible loss at dashboard size.
+    .image_raw.compressed.jpeg_quality: 60   # note the leading dot (image_transport's naming)

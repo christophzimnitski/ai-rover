@@ -9,7 +9,8 @@ ugv_driver:
                                   # (contact-patch centres) = the kinematic track for
                                   # diff-drive. NOT the 0.13 m inner gap between treads
                                   # (13 gap + 4.5 tread width = 17.5 centre-to-centre).
-    max_wheel_speed: 0.5          # m/s, hard ESP32 limit for the {"T":1} command
+    max_wheel_speed: 0.5          # {"T":1} saturates here: firmware maps value*512 -> PWM,
+                                  # so 0.498 = PWM 255 = full throttle (docs/FIRMWARE.md)
     angular_gain: 1.0             # KEEP AT 1.0. This scales angular.z BELOW the /cmd_vel
                                   # seam, so any other value means /cmd_vel is no longer a
                                   # faithful physical contract (true rad/s) for EVERY
@@ -17,14 +18,31 @@ ugv_driver:
                                   # silently turn wrong. Tune turn *feel* ABOVE the seam, in
                                   # teleop_joy.yaml (scale_angular / scale_angular_turbo).
 
-    # Stiction compensation: overcome static friction at low speed. Any NON-ZERO wheel
-    # command below this magnitude is bumped up to it (sign preserved); exact zero stays
-    # zero. Fixes "won't turn at low speed" without you having to floor the stick. Tune
-    # down toward the point where the wheels just reliably start; 0.0 disables it.
-    min_wheel_speed: 0.10         # m/s
+    # Stiction floor (legacy): any NON-ZERO wheel command below this magnitude is bumped
+    # up to it. OFF now that wheel_trim closes the loop -- the trim integrator finds the
+    # right boost per surface instead of a fixed floor amplifying stick drift. Re-raise
+    # to ~0.10 only if you also turn wheel_trim off.
+    min_wheel_speed: 0.0          # m/s (0 = off)
+
+    # Speed trim: Pi-side closed loop over the OPEN-LOOP firmware (the board maps
+    # {"T":1} straight to PWM; same command = different real speed per surface, and
+    # low commands stick then lurch). A slow per-wheel integrator nudges the outgoing
+    # command until the encoder-reported speed matches the commanded speed: breaks
+    # stiction smoothly and makes /cmd_vel physically true on any surface.
+    wheel_trim: true
+    trim_ki: 1.2                  # 1/s; raise for faster convergence, lower if it hunts
+    trim_limit: 0.25              # max correction ever added to a wheel command
+
+    # Web driving (dashboard joystick -> /web_cmd_vel): accepted only while /cmd_vel
+    # (gamepad / autonomy) has been quiet this long. The gamepad always wins.
+    mux_window: 0.5               # s
 
     # Safety.
-    cmd_timeout: 0.5              # s, stop if /cmd_vel goes quiet (crash / SSH drop)
+    cmd_timeout: 0.5              # s, stop if drive commands go quiet (crash / SSH drop)
+    board_heartbeat_ms: 1000      # firmware-side dead-man ({"T":136}): the BOARD stops
+                                  # itself if no command arrives for this window -- covers
+                                  # the whole Pi stack dying mid-drive. 0 = leave firmware
+                                  # default (3000ms).
     require_serial: true          # set false to dry-run the node without hardware
 
     # Telemetry (read path): stream the ESP32 feedback and republish it as typed

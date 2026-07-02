@@ -16,7 +16,6 @@ speeds are reconstructed from /cmd_vel with the same track_width as the driver, 
 they line up with the board's measured L/R regardless of the (unknown) L/R units --
 cross-correlation is scale-invariant after de-meaning.
 """
-import json
 import sys
 import time
 
@@ -25,7 +24,7 @@ from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from geometry_msgs.msg import Twist
 from sensor_msgs.msg import Joy
-from std_msgs.msg import String
+from ugv_msgs.msg import Telemetry
 
 try:
     import numpy as np
@@ -43,7 +42,7 @@ class Diag(Node):
         self.joy, self.cmd, self.tel = [], [], []
         self.create_subscription(Joy, "/joy", self._on_joy, qos_profile_sensor_data)
         self.create_subscription(Twist, "/cmd_vel", self._on_cmd, 10)
-        self.create_subscription(String, "/rover/telemetry", self._on_tel, 10)
+        self.create_subscription(Telemetry, "/rover/telemetry", self._on_tel, 10)
         self.create_timer(1.0, self._tick)
         self.get_logger().info(f"recording for {duration:.0f}s ...")
 
@@ -62,11 +61,8 @@ class Diag(Node):
         self.cmd.append((self._now(), v, w, v - w * half, v + w * half))
 
     def _on_tel(self, m):
-        try:
-            d = json.loads(m.data)
-        except ValueError:
-            return
-        self.tel.append((self._now(), d.get("L"), d.get("R"), d.get("v")))
+        self.tel.append((self._now(), float(m.left_speed), float(m.right_speed),
+                         float(m.voltage)))
 
     def _tick(self):
         t = self._now()

@@ -60,4 +60,46 @@ main{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:1
 .btn{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px;margin-top:6px;align-self:flex-start}
 .btn:hover{border-color:var(--accent)}
 
-@media(max-width:640px){.attitude,.odom{flex-direction:column;align-items:stretch}}
+/* header actions inside a panel title (snapshot link, stream size) */
+.h-actions{display:flex;gap:6px;align-items:center;margin-left:auto}
+.h-actions .btn{margin-top:0}
+a.btn{text-decoration:none;display:inline-block}
+.sel{appearance:none;-webkit-appearance:none;padding-right:14px}
+
+/* drive: virtual joystick + side controls */
+.drive{display:flex;gap:16px;align-items:center}
+.stick{position:relative;width:170px;height:170px;flex:0 0 auto;border-radius:50%;
+  background:radial-gradient(circle at 50% 45%,var(--panel2),#12161d 75%);
+  border:1px solid var(--line);touch-action:none;cursor:grab}
+.stick::before,.stick::after{content:"";position:absolute;background:var(--line)}
+.stick::before{left:50%;top:8px;bottom:8px;width:1px}
+.stick::after{top:50%;left:8px;right:8px;height:1px}
+.knob{position:absolute;left:50%;top:50%;width:56px;height:56px;margin:-28px 0 0 -28px;
+  border-radius:50%;background:linear-gradient(180deg,#2c3a4d,#1d2733);
+  border:1px solid var(--accent);box-shadow:0 2px 10px rgba(0,0,0,.5);pointer-events:none}
+.drive-side{display:flex;flex-direction:column;gap:10px;flex:1;min-width:0}
+.hint{color:var(--muted);font-size:11px}
+
+.btn.estop{background:#3a1214;border-color:var(--crit);color:#ff6b60;font-weight:700;
+  font-size:14px;padding:10px 0;width:100%;text-align:center;border-radius:8px;margin-top:0}
+.btn.estop:hover{background:#4a1518;border-color:#ff6b60}
+.btn.estop.engaged{background:var(--crit);color:#fff;animation:estop-pulse 1s infinite}
+@keyframes estop-pulse{50%{filter:brightness(1.25)}}
+
+/* sliders (drive max speed, lights) */
+.slider-row{display:flex;align-items:center;gap:8px}
+.slider-row input[type=range]{flex:1;accent-color:var(--accent);min-width:0}
+.slider-row .v{font-size:14px;min-width:36px;text-align:right}
+
+.row-btns{display:flex;gap:8px;margin:8px 0}
+.row-btns .btn{margin-top:0}
+
+.oled-row{display:flex;gap:6px;align-items:center;margin-top:8px}
+.oled-row input[type=text]{flex:1;min-width:0;background:var(--panel2);color:var(--text);
+  border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-size:12px}
+.oled-row .btn{margin-top:0}
+
+.warn-badge{margin-left:auto;font-size:10px;color:var(--warn);border:1px solid rgba(255,214,10,.35);
+  border-radius:999px;padding:2px 8px;white-space:nowrap;cursor:help}
+
+@media(max-width:640px){.attitude,.odom,.drive{flex-direction:column;align-items:stretch}}

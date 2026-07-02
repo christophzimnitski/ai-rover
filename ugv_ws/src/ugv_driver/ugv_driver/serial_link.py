@@ -3,7 +3,9 @@
 The ESP32 "General Driver Board" speaks newline-delimited JSON at 115200 baud.
 Movement is one command type:
 
-    {"T": 1, "L": <left_mps>, "R": <right_mps>}   # L,R in m/s, range -0.5..+0.5
+    {"T": 1, "L": <left>, "R": <right>}   # +-0.5; the stock firmware maps this
+                                          # OPEN-LOOP to PWM (value*512, sat 255),
+                                          # so it is a throttle fraction, not m/s.
 
 This module knows *nothing* about ROS. It is deliberately small and importable
 on its own so it can be unit-tested and reused by scripts/serial_smoketest.py.
@@ -12,8 +14,12 @@ SELF-HEALING. The link recovers on its own, the same way joy_supervisor keeps th
 gamepad alive. The telemetry reader watches two failure signals:
   1. the port erroring (readline/write raising) -> close and re-open the fd, and
   2. the feedback stream going stale (no {"T":1001} frames) while the fd is fine
-     -> the ESP32 reset/browned-out and forgot it was streaming, so re-arm it.
+     -> first RE-ARM the stream (a reset board forgot it was streaming); if it is
+     STILL stale one stale_timeout later, ESCALATE to a full fd re-open (observed
+     in the field: after ~3h a wedged UART recovered only after close+reopen).
 Both are rate-limited by min_reconnect_interval so a flapping link can't thrash.
+on_link_up fires after every successful (re)open so the owner can re-send any
+board configuration (heartbeat window, lights state, ...).
 """
 from __future__ import annotations
 
@@ -28,26 +34,29 @@ try:
 except ImportError:  # allow import where pyserial is absent (e.g. lint/test on Mac)
     serial = None
 
-# ESP32 JSON command type for closed-loop wheel speed control (m/s).
-CMD_SPEED_CTRL = 1
-# Telemetry stream control (Waveshare "General Driver Board"):
-#   {"T":142,"cmd":<ms>}  set the feedback interval, then
-#   {"T":131,"cmd":1|0}   turn the newline-delimited JSON feedback stream on|off.
-# The board then emits {"T":1001,...} lines carrying wheel speeds, IMU and voltage.
-CMD_FEEDBACK_INTERVAL = 142
-CMD_FEEDBACK_FLOW = 131
+# ESP32 JSON command types (see docs/FIRMWARE.md for the full T-code protocol).
+CMD_SPEED_CTRL = 1          # {"T":1,"L":x,"R":x}  open-loop wheel throttle
+CMD_OLED_TEXT = 3           # {"T":3,"lineNum":n,"Text":s}
+CMD_OLED_DEFAULT = -3       # {"T":-3} restore default OLED screen
+CMD_GET_IMU = 126           # {"T":126} -> one {"T":1002} raw-IMU reply
+CMD_FEEDBACK_ONCE = 130     # {"T":130} -> one {"T":1001} frame
+CMD_FEEDBACK_FLOW = 131     # {"T":131,"cmd":1|0} feedback stream on|off
+CMD_LED_CTRL = 132          # {"T":132,"IO4":0-255,"IO5":0-255} headlights
+CMD_HEARTBEAT_SET = 136     # {"T":136,"cmd":<ms>} board-side dead-man window
+CMD_FEEDBACK_INTERVAL = 142  # {"T":142,"cmd":<ms>} feedback cadence
 # The board's telemetry frame type. Everything else on the wire (command echoes,
 # other T-codes) is NOT telemetry and must not reach /rover/telemetry.
 FEEDBACK_TYPE = 1001
 
 
 class SerialLink:
-    """Owns the serial port and serializes wheel-speed commands to the ESP32."""
+    """Owns the serial port and serializes JSON commands to the ESP32."""
 
     def __init__(self, port: str = "/dev/serial0", baud: int = 115200,
                  require_serial: bool = True, logger: object = None,
                  stale_timeout: float = 2.0,
-                 min_reconnect_interval: float = 3.0) -> None:
+                 min_reconnect_interval: float = 3.0,
+                 on_link_up: Optional[Callable[[], None]] = None) -> None:
         self._port = port
         self._baud = baud
         self._lock = threading.Lock()      # serializes WRITES + reopen (reads are lock-free)
@@ -59,6 +68,7 @@ class SerialLink:
         # Background telemetry reader (see start_telemetry). Reads and writes share the
         # one fd but run in opposite directions, which is safe on a serial port.
         self._on_telem: Optional[Callable[[dict], None]] = None
+        self._on_link_up = on_link_up
         self._read_thread: Optional[threading.Thread] = None
         self._stop_read = threading.Event()
         self._last_telem: Optional[dict] = None
@@ -70,6 +80,10 @@ class SerialLink:
         self._seen_telem = False
         self._last_rx = time.monotonic()
         self._last_recover = 0.0                  # thrash guard for reopen + re-arm
+        self._rearmed_at = 0.0                    # when the stale path last re-armed
+        # Health counters for /rover/link (monotonic, never reset).
+        self.reconnects = 0
+        self.rearms = 0
 
         if serial is None:
             if require_serial:
@@ -88,6 +102,13 @@ class SerialLink:
     def connected(self) -> bool:
         return self._ser is not None and self._ser.is_open
 
+    @property
+    def telemetry_age(self) -> float:
+        """Seconds since the last {"T":1001} frame; -1.0 if none seen yet."""
+        if not self._seen_telem:
+            return -1.0
+        return time.monotonic() - self._last_rx
+
     def _write(self, obj: dict) -> None:
         line = (json.dumps(obj) + "\n").encode("utf-8")
         with self._lock:
@@ -101,8 +122,12 @@ class SerialLink:
                 # never take down the node); the reader thread handles the reopen.
                 pass
 
+    def send(self, obj: dict) -> None:
+        """Send an arbitrary JSON command frame (lights, OLED, heartbeat, ...)."""
+        self._write(obj)
+
     def drive(self, left: float, right: float) -> None:
-        """Set the left/right wheel target speed in m/s."""
+        """Set the left/right wheel command (open-loop throttle, +-0.5 usable)."""
         self._write({"T": CMD_SPEED_CTRL,
                      "L": round(float(left), 4),
                      "R": round(float(right), 4)})
@@ -188,11 +213,42 @@ class SerialLink:
                 self._ser = None
                 ok = False
         if ok:
+            self.reconnects += 1
             self._arm_stream()                # arm OUTSIDE the lock (each _write locks)
+            if self._on_link_up is not None:
+                try:
+                    self._on_link_up()        # let the owner re-send board config
+                except Exception:
+                    pass
             self._log.info("serial link recovered: re-opened %s" % self._port)
         else:
             self._log.warning("serial link down: re-open of %s failed" % self._port)
         return ok
+
+    def _handle_stale(self, now: float) -> None:
+        """Stream quiet with a healthy-looking fd. Recover in two stages.
+
+        Stage 1: re-arm the stream (a reset/browned-out board forgot it was
+        streaming -- the cheap fix). Stage 2: if a re-arm was already tried and the
+        stream is STILL quiet one stale_timeout later, the fd itself is wedged even
+        though reads aren't raising -- close and re-open it, then re-arm (the fix
+        that field-recovered the 3h-uptime hang). Both rate-limited.
+        """
+        if now - self._last_recover < self._min_reconnect_interval:
+            return
+        if self._rearmed_at <= self._last_rx:
+            # First sign of staleness since data last flowed: try the cheap re-arm.
+            self._last_recover = now
+            self._rearmed_at = now
+            self.rearms += 1
+            self._log.warning(
+                "telemetry stale for >%.1fs; re-arming ESP32 stream" % self._stale_timeout)
+            self._arm_stream()
+        else:
+            # Re-arm didn't bring data back: the fd is wedged. Full re-open.
+            self._log.warning(
+                "telemetry still stale after re-arm; re-opening %s" % self._port)
+            self._reopen()
 
     def _read_loop(self) -> None:
         while not self._stop_read.is_set():
@@ -218,14 +274,7 @@ class SerialLink:
                     except Exception:
                         pass                  # never let a consumer kill the reader
             elif self._seen_telem and (time.monotonic() - self._last_rx) > self._stale_timeout:
-                # Stream went quiet with a healthy fd: the board reset/browned-out and
-                # forgot it was streaming. Re-arm it (rate-limited by min_reconnect_interval).
-                if time.monotonic() - self._last_recover >= self._min_reconnect_interval:
-                    self._last_recover = time.monotonic()
-                    self._log.warning(
-                        "telemetry stale for >%.1fs; re-arming ESP32 stream"
-                        % self._stale_timeout)
-                    self._arm_stream()
+                self._handle_stale(time.monotonic())
 
     def close(self) -> None:
         # Stop the reader first so it isn't blocked on a port we're about to close.

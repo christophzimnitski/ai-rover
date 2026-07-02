@@ -7,6 +7,9 @@ find_package(std_msgs REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/Telemetry.msg"
+  "msg/Lights.msg"
+  "msg/OledText.msg"
+  "msg/LinkStatus.msg"
   DEPENDENCIES std_msgs
 )
 

@@ -5,7 +5,7 @@ the Twist -> wheel mix, the symmetric clamp, and the stiction floor edge cases.
 """
 import math
 
-from ugv_driver.kinematics import apply_min, clamp, twist_to_wheels
+from ugv_driver.kinematics import SpeedTrim, apply_min, clamp, twist_to_wheels
 
 TRACK = 0.175   # m, matches config/driver_params.yaml
 MAX = 0.5       # m/s
@@ -78,3 +78,76 @@ def test_stiction_floor_applied_after_mix():
 def test_stop_command_stays_stopped_with_floor_on():
     # Exact zero Twist must not be lifted to the floor.
     assert twist_to_wheels(0.0, 0.0, TRACK, MAX, 0.10) == (0.0, 0.0)
+
+
+# --- SpeedTrim (Pi-side closed loop over the open-loop firmware) ------------
+DT = 0.05   # 20Hz ticks, matching the telemetry/teleop cadence
+
+
+def test_trim_zero_command_is_hard_zero():
+    trim = SpeedTrim()
+    trim.update(0.2, 0.0, DT)          # build some trim first
+    assert trim.update(0.0, 0.15, DT) == 0.0
+
+
+def test_trim_boosts_a_stalled_wheel():
+    # Wheel commanded 0.2 but measured 0 (stiction): output must grow above cmd.
+    trim = SpeedTrim(ki=1.2, trim_limit=0.25)
+    out = 0.2
+    for _ in range(20):                # one second of stall
+        out = trim.update(0.2, 0.0, DT)
+    assert out > 0.25                  # meaningful boost accumulated...
+    assert out <= 0.2 + 0.25           # ...but never beyond cmd + limit
+
+
+def test_trim_converges_to_passthrough_on_ideal_wheel():
+    # Closed loop against a perfect actuator (measured follows the last output):
+    # after the spin-up transient the trim must unwind to ~0 (output == command).
+    trim = SpeedTrim()
+    meas = 0.0
+    for _ in range(100):               # 5s at 20Hz
+        out = trim.update(0.3, meas, DT)
+        meas = out                     # ideal wheel, one-tick delay
+    assert math.isclose(out, 0.3, abs_tol=0.005)
+
+
+def test_trim_breaks_stiction_and_holds_true_speed():
+    # Sticky wheel: dead until the command reaches a 0.28 breakaway, then tracks
+    # output minus 0.05 drag. The trim must break it loose and settle with the
+    # MEASURED speed at the commanded 0.2 (output ~0.25 doing the compensating).
+    trim = SpeedTrim()
+    meas, broken = 0.0, False
+    for _ in range(100):
+        out = trim.update(0.2, meas, DT)
+        broken = broken or out >= 0.28
+        meas = max(0.0, out - 0.05) if broken else 0.0
+    assert broken                      # stiction was broken by the boost
+    assert math.isclose(meas, 0.2, abs_tol=0.01)
+
+
+def test_trim_unwinds_after_stiction_breaks():
+    # Stall builds boost; once the wheel overshoots, the boost must bleed off.
+    trim = SpeedTrim(ki=1.2, trim_limit=0.25)
+    for _ in range(20):
+        trim.update(0.2, 0.0, DT)      # stalled: boost up
+    boosted = trim.update(0.2, 0.0, DT)
+    for _ in range(40):
+        out = trim.update(0.2, 0.30, DT)   # now overshooting: unwind
+    assert out < boosted
+    assert out < 0.2 + 0.05
+
+
+def test_trim_resets_on_direction_change():
+    # Forward stall boost must not leak into a reverse command.
+    trim = SpeedTrim()
+    for _ in range(20):
+        trim.update(0.2, 0.0, DT)
+    first_reverse = trim.update(-0.2, 0.0, DT)
+    assert abs(first_reverse - (-0.2)) < 0.02
+
+
+def test_trim_ignores_silly_dt_gaps():
+    # A paused stream (dt >= 0.5s) must not integrate a huge step.
+    trim = SpeedTrim()
+    out = trim.update(0.2, 0.0, 3.0)
+    assert math.isclose(out, 0.2, abs_tol=1e-9)
