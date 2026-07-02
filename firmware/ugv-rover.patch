@@ -1,0 +1,39 @@
+diff --git a/General_Driver/movtion_module.h b/General_Driver/movtion_module.h
+index 968664d..47be2d3 100644
+--- a/General_Driver/movtion_module.h
++++ b/General_Driver/movtion_module.h
+@@ -419,7 +419,7 @@ void mm_settings(byte inputMain, byte inputModule) {
+     WHEEL_D = 0.0800;
+     ONE_CIRCLE_PLUSES = 1650;
+     TRACK_WIDTH = 0.172;
+-    SET_MOTOR_DIR = true; // checked
++    SET_MOTOR_DIR = false; // checked
+     usePIDCompute = false;
+   } else if (mainType == 3) {
+     WHEEL_D = 0.0523;
+diff --git a/General_Driver/ugv_config.h b/General_Driver/ugv_config.h
+index f59a8b4..7600099 100644
+--- a/General_Driver/ugv_config.h
++++ b/General_Driver/ugv_config.h
+@@ -35,7 +35,7 @@ bool runNewJsonCmd = false;
+ // 1: WAVE ROVER
+ // 2: UGV02(UGV)
+ // 3: UGV01(UGV)
+-byte mainType = 1;
++byte mainType = 2;
+ 
+ // 0: [Base default] without RoArm-M2 and gimbal.
+ // 1: [RoArm default] RoArm-M2 mounted on the UGV.
+diff --git a/General_Driver/wifi_ctrl.h b/General_Driver/wifi_ctrl.h
+index 9901101..e3dd806 100644
+--- a/General_Driver/wifi_ctrl.h
++++ b/General_Driver/wifi_ctrl.h
+@@ -16,7 +16,7 @@
+ // 1: AP (default mode as a brand new product)
+ // 2: STA
+ // 3: AP+STA (default mode after first wifi connection succeed)
+-byte WIFI_MODE_ON_BOOT = 1;
++byte WIFI_MODE_ON_BOOT = 0;
+ const char* sta_ssid = "none";
+ const char* sta_password = "none";
+ const char* ap_ssid = "UGV";

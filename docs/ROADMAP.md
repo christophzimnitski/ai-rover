@@ -28,12 +28,15 @@ drop is accepted (mitigated by e-stop + board heartbeat); the microSD is failing
 - **0.1 Replace the failing microSD** (or migrate to USB-SSD). Reflash Pi OS,
   run `scripts/bootstrap.sh`, re-apply the camera udev rule — and commit that
   rule into `bootstrap.sh`/`PI_SETUP.md` so a fresh Pi gets it automatically.
-- **0.2 Reflash the ESP32** with current `ugv_base_general` (fixes the IMU,
-  adds yaw+temp to feedback). Post-flash checklist is safety-critical:
-  drive-direction + feedback signs (type defaults may differ — see the T:900
-  warning in `docs/FIRMWARE.md`), `{"T":126}` sanity (az ≈ ±1g flat),
-  `{"T":127}` calibration, boot-mission state. Then flip `IMU_TRUSTED` in
-  `webapp/app.js` and drop the dashboard warning badge.
+- **0.2 Reflash the ESP32** — procedure prepared, see **`docs/REFLASH.md`**:
+  build `ugv_base_general` @ `d308df9` (v0.95) + `firmware/ugv-rover.patch`
+  (3 lines: UGV Rover geometry at boot, keep our motor direction, WiFi AP off).
+  Fixes the IMU (native QMI8658+AK09918 drivers) and adds yaw+temp to feedback.
+  Prebuilt repo bins are stale (v0.90) — source build only. Post-flash checklist
+  is safety-critical (wheels off ground: direction + feedback signs, `{"T":126}`
+  sanity with |az| ≈ 1000mg flat, dead-man). `{"T":127}` calibration is a no-op
+  in this firmware — dropped. Then flip `IMU_TRUSTED` in `webapp/app.js` and
+  drop the dashboard warning badge.
 - **0.3 Ground-tune `wheel_trim`** on tile + carpet (trim_ki / trim_limit);
   re-measure with `scripts/diag_latency.py`.
 

@@ -3,11 +3,14 @@
 Findings from reading [waveshareteam/ugv_base_general](https://github.com/waveshareteam/ugv_base_general)
 and probing our board over serial (2026-07). This is the ground truth behind several
 driver design decisions; read this before "fixing" anything speed- or IMU-related.
+The reflash procedure that fixes the IMU is prepared in `docs/REFLASH.md`.
 
 ## Our board's state
 
-* Firmware is an **older build** of `ugv_base_general`: its `{"T":1001}` feedback frame
-  carries only `L,R,r,p,v` (current firmware adds `y` = yaw and `temp`).
+* Firmware **predates the public `ugv_base_general` repo entirely**: its `{"T":1001}`
+  feedback frame carries only `L,R,r,p,v` — even the repo's first commit (2024-07)
+  already emitted `y`. Current firmware (v0.95) adds `y` = yaw and `temp`, and drives
+  the board's QMI8658+AK09918 IMU natively (see `docs/REFLASH.md`).
 * The **boot mission is empty** and nothing sends `{"T":900,...}` (robot-type select)
   since the stock app was disabled, so the board runs its compiled-in defaults:
   `mainType=1`, geometry `WHEEL_D=0.08 / 1650 pulses / TRACK_WIDTH=0.172` — which

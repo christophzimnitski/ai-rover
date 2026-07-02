@@ -55,9 +55,11 @@ docker/                   ROS 2 Jazzy image + compose (runs on Raspberry Pi OS, 
 scripts/                  dev loop: sync / reload / build / verify / logs (+ serial_smoketest, diag)
 tests/                    off-site pytest suite for the ROS-free logic (never runs on the Pi)
 webapp/                   zero-dependency dashboard (video, telemetry, drive pad, lights, e-stop)
+firmware/                 our 3-line patch for the stock ESP32 firmware (see docs/REFLASH.md)
 docs/PI_SETUP.md          one-time Pi setup — START HERE
 docs/COMMANDS.md          day-to-day command cheatsheet
 docs/FIRMWARE.md          what the ESP32 firmware really does (open-loop PWM, IMU state, T-codes)
+docs/REFLASH.md           ESP32 reflash procedure + post-flash safety checklist
 ```
 
 ## Why Docker?
