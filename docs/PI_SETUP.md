@@ -77,6 +77,10 @@ You're already in the Pi — these make a roaming, headless, vision-running robo
   `dtparam=uart0=on`). So on a Pi 5, target `/dev/ttyAMA0` directly, not `serial0`. The
   stock Waveshare app does the same (it hardcodes `ttyAMA0` when it detects a Pi 5).
 
+**Camera reliability:** `scripts/bootstrap.sh` installs a udev rule that disables USB
+autosuspend for the EMEET C950 (autosuspend mid-stream wedges it until replugged) —
+nothing to do here, it's automatic on every fresh Pi/SD.
+
 **Keep it healthy:**
 - Update once: `sudo apt update && sudo apt full-upgrade -y`, then firmware `sudo rpi-eeprom-update -a`.
 - Cooling: a heatsink/fan matters — the Pi throttles under load, and cat-detection will push it.

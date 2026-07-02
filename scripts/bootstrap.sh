@@ -15,6 +15,8 @@ REMOTE="${ROVER_SSH:-rover}"
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 "$DIR/sync.sh"
+echo "installing camera udev rule (no USB autosuspend, prevents the C950 wedging) ..."
+ssh "$REMOTE" 'sudo cp ~/rover/scripts/99-rover-camera-no-autosuspend.rules /etc/udev/rules.d/ && sudo udevadm control --reload-rules && sudo udevadm trigger'
 echo "building rover image ..."
 ssh "$REMOTE" 'cd ~/rover/docker && docker compose build'
 echo "building colcon workspace (symlink-install) ..."

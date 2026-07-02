@@ -1,0 +1,4 @@
+# EMEET SmartCam C950 wedges if Linux's USB autosuspend touches it mid-stream (the camera
+# stops responding until replugged). Keep it always-on. Installed by scripts/bootstrap.sh
+# to /etc/udev/rules.d/ on the Pi -- see docs/PI_SETUP.md.
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="328f", ATTR{idProduct}=="00ba", TEST=="power/control", ATTR{power/control}="on"
