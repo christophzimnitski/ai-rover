@@ -7,10 +7,14 @@ The reflash procedure that fixes the IMU is prepared in `docs/REFLASH.md`.
 
 ## Our board's state
 
-* Firmware **predates the public `ugv_base_general` repo entirely**: its `{"T":1001}`
-  feedback frame carries only `L,R,r,p,v` — even the repo's first commit (2024-07)
-  already emitted `y`. Current firmware (v0.95) adds `y` = yaw and `temp`, and drives
-  the board's QMI8658+AK09918 IMU natively (see `docs/REFLASH.md`).
+* **REFLASHED 2026-07-02** to `ugv_base_general` v0.95 (`d308df9`) + our 4-change
+  patch (`firmware/ugv-rover.patch`, procedure in `docs/REFLASH.md`). The board now
+  boots with correct UGV Rover geometry compiled in, WiFi off, our verified motor
+  direction, and the IMU compiled out (see below). `{"T":1001}` now carries
+  `L,R,r,p,y,temp,v`. Direction, encoder scale (cmd 0.2 → meas ≈ 0.2), and the
+  board dead-man (default 3s window, driver arms 1s) were verified wheels-off.
+  The pre-flash firmware (which predated the public repo entirely — its frame
+  lacked `y`) is preserved in `firmware/stock-*.bin` (local only, gitignored).
 * The **boot mission is empty** and nothing sends `{"T":900,...}` (robot-type select)
   since the stock app was disabled, so the board runs its compiled-in defaults:
   `mainType=1`, geometry `WHEEL_D=0.08 / 1650 pulses / TRACK_WIDTH=0.172` — which
@@ -40,7 +44,24 @@ legacy open-loop workaround; keep it 0 while trim is on.
   iteration → quantized to ~**0.15 m/s** steps. Filtering (trim's EMA) recovers
   usable resolution; per-pulse odometry would need firmware changes.
 
-## The IMU readings are broken at the source (roll=90°)
+## The IMU: this board revision has NO QMI8658 (resolved 2026-07-02)
+
+The reflash solved the mystery: current `ugv_base_general` drives a QMI8658 +
+AK09918, but on our board `WhoAmI` reads `0xff` on **both** QMI8658 I2C addresses —
+the chip isn't there. This is the **older board revision** (almost certainly
+ICM20948, matching the firmware's legacy `icm_*` naming and `Adafruit_ICM20948`
+include). The historic "dead accel-Z / roll pins at 90°" garbage was a
+chip/driver mismatch, not a broken sensor. Consequences:
+
+* Stock firmware **hangs its main loop** on the missing chip's I2C timeouts, so
+  our patch compiles the IMU out (`IMU_ABSENT`): `r/p/y` are clean `0.0` in
+  telemetry, `temp` is the ESP32's internal sensor (~50°C).
+* `IMU_TRUSTED` stays `false` in `webapp/app.js`.
+* A working IMU needs a **custom ICM20948 read path** in the sketch feeding the
+  existing AHRS fusion (the Adafruit driver is already a build dependency) — a
+  candidate follow-up task, not part of Phase 0.2.
+
+## Historical: the old firmware's IMU readings (pre-reflash)
 
 Probed flat on the bench, `{"T":126}` returns:
 

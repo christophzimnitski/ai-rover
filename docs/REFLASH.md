@@ -19,7 +19,17 @@ at commit `b113287` ("version: 0.90") and are missing the two later source commi
 that matter: `bc2184c` re-enables the magnetometer read and adds `y`+`temp` to the
 frame. The prebuilt bin would leave us with roughly what we already have.
 
-### Why each line of the patch (3 lines, all compile-time defaults)
+> **OUTCOME (2026-07-02): flashed and verified.** One major discovery during the
+> flash: **this board has no QMI8658** — `WhoAmI` reads `0xff` on both I2C
+> addresses, so it is the older board revision (almost certainly ICM20948).
+> The stock firmware hangs its main loop on the missing chip's I2C timeouts,
+> so the patch grew a 4th change that compiles the IMU out (`IMU_ABSENT` in
+> `IMU_ctrl.h`): roll/pitch/yaw are clean 0.0 in telemetry, `temp` is the ESP32
+> internal sensor. **A working IMU is not achievable on this board with stock
+> firmware** — it would need a custom ICM20948 driver added to the sketch
+> (the Adafruit lib is already a dependency), tracked as a possible follow-up.
+
+### Why each line of the patch (all compile-time defaults)
 
 The stock firmware calls `mm_settings(mainType, moduleType)` in `setup()`, which
 **overrides** the geometry variables. There is no stock configuration that is
@@ -41,6 +51,9 @@ The patch (applies cleanly to `d308df9` with `git apply`):
 3. `wifi_ctrl.h`: `byte WIFI_MODE_ON_BOOT = 1;` → `0` — the stock default would
    broadcast an open AP (`UGV` / `12345678`) with a web control page on every boot.
    Off; can still be enabled over UART later if ever wanted.
+4. `IMU_ctrl.h`: `IMU_ABSENT` guard — this board revision has no QMI8658 (see
+   outcome note above); without the guard the missing chip's I2C timeouts
+   throttle the entire command loop to uselessness.
 
 The **"never send `{"T":900}`" rule still stands** after reflashing: everything is
 compiled in; a runtime `T:900` with `main:1` would silently load the wrong geometry
@@ -56,10 +69,14 @@ Known-good versions taken from the vendor's own build artifacts (`.map` file):
   scheme (app is ~995KB, fits), upload speed default
 - **ArduinoJson 6.x** (e.g. 6.21.5) — the sketch uses the v6 `StaticJsonDocument`
   API; v7 deprecated it
-- Library Manager: `Adafruit SSD1306`, `INA219_WE`, `ESP32Encoder`, `PID_v2`,
+- **INA219_WE 1.3.x** (e.g. 1.3.8) — 1.4+ renamed the constants (`BIT_MODE_9`,
+  `PG_320`, `BRNG_16` → `INA219_*`) and the sketch uses the old names
+- Library Manager: `Adafruit SSD1306`, `ESP32Encoder`, `PID_v2`,
   `SimpleKalmanFilter`, `Adafruit ICM20X` (+ its `Adafruit ICM20948` /
   `Adafruit Sensor` dependencies — still `#include`d even though the ICM chip
   driver is unused on this board rev). `LittleFS` is bundled with core 2.x.
+- **Apple Silicon Mac**: the core's bundled `ctags`/`esptool` are Intel-only —
+  install Rosetta 2 first (`softwareupdate --install-rosetta --agree-to-license`).
 - **SCServo**: not in the Library Manager — copy the `SCServo/` folder from the
   `ugv_base_general` repo into the Arduino `libraries/` directory.
 
@@ -70,7 +87,7 @@ brew install arduino-cli
 arduino-cli config init --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
 arduino-cli core update-index
 arduino-cli core install esp32:esp32@2.0.14
-arduino-cli lib install "ArduinoJson@6.21.5" "Adafruit SSD1306" "INA219_WE" \
+arduino-cli lib install "ArduinoJson@6.21.5" "Adafruit SSD1306" "INA219_WE@1.3.8" \
     "ESP32Encoder" "PID_v2" "SimpleKalmanFilter" "Adafruit ICM20X"
 
 git clone https://github.com/waveshareteam/ugv_base_general.git
@@ -89,17 +106,52 @@ arduino-cli compile --fqbn esp32:esp32:esp32 General_Driver
    during/after the flash: `ssh rover 'cd ~/rover/docker && docker compose stop rover'`.
 2. **Connect USB**: the driver board's ESP32 **USB-C port** to the Mac (this is the
    UART0/download port with auto-reset — not the LiDAR port). Board can stay
-   battery-powered. Find the port: `ls /dev/cu.usbserial*` (CP210x) or `/dev/cu.wchusbserial*`.
-3. **Full flash erase first** (guarantees: empty boot mission, no stored WiFi
-   config, no stale LittleFS) — esptool ships inside the ESP32 core:
+   battery-powered. The port shows up as `/dev/cu.usbmodem*` (CDC) or
+   `/dev/cu.usbserial*` depending on bridge chip. Chip is an **ESP32-D0WD-V3**.
+3. **Release the Pi's UART TX** — the board's USB-C and the Pi GPIO header share
+   the ESP32's UART0. The Pi's TX (GPIO14) overpowers the USB bridge even when
+   nothing is transmitting ("serial TX path seems to be down" from esptool):
    ```bash
-   python3 ~/Library/Arduino15/packages/esp32/tools/esptool_py/*/esptool.py \
-       --chip esp32 --port /dev/cu.usbserial-XXXX erase_flash
+   ssh rover 'pinctrl set 14 ip'    # tri-state TX; restore after: pinctrl set 14 a4
    ```
-4. **Upload**:
+4. **esptool quirks on macOS** (hard-won): the macOS CDC driver has **no flow
+   control** to this bridge chip — any bulk write faster than the UART line rate
+   overflows the bridge FIFO and corrupts data (stub upload fails "Failed to
+   write to target RAM"; `--no-stub` writes fail too, and no-stub can't
+   `erase_flash` or read above 2MB). The fix is `firmware/esptool_chunked.py`:
+   a wrapper that paces serial writes to the wire rate (64-byte chunks,
+   `len*10/baud*1.2` sleep). With it the stub runs and everything works,
+   including compressed+verified writes at `--baud 460800`.
+   Flashing **from the Pi** avoids all of this (Linux driver is fine) — it just
+   needs a *data* USB-A→C cable; charge-only cables don't enumerate at all.
+5. **Back up the current firmware first** — done 2026-07-02, kept locally as
+   `firmware/stock-fw-backup-first2MB-esp32-2026-07-02.bin` (bootloader +
+   partition table + full active app0; the upper 2MB is only the inactive OTA
+   slot + SPIFFS) and `firmware/stock-app0-esp32-2026-07-02.bin` (the exact
+   stock app image — restore with `write_flash 0x10000 <file>`). Backups stay
+   local, `firmware/*.bin` is gitignored. For a fresh backup:
    ```bash
-   arduino-cli upload -p /dev/cu.usbserial-XXXX --fqbn esp32:esp32:esp32 General_Driver
+   ESPTOOL='<venv>/bin/python3 firmware/esptool_chunked.py'   # macOS; plain esptool.py elsewhere
+   $ESPTOOL --baud 460800 --port /dev/cu.usbmodemXXXX \
+       read_flash 0 0x400000 firmware/stock-fw-backup-esp32-<date>.bin
    ```
+6. **Full flash erase** (guarantees: empty boot mission, no stored WiFi config,
+   no stale LittleFS):
+   ```bash
+   $ESPTOOL --port /dev/cu.usbmodemXXXX erase_flash
+   ```
+7. **Write** (offsets per ESP32 Arduino convention):
+   ```bash
+   $ESPTOOL --baud 460800 --port /dev/cu.usbmodemXXXX write_flash \
+       0x1000 fw-build/General_Driver.ino.bootloader.bin \
+       0x8000 fw-build/General_Driver.ino.partitions.bin \
+       0xe000 ~/Library/Arduino15/packages/esp32/hardware/esp32/2.0.14/tools/partitions/boot_app0.bin \
+       0x10000 fw-build/General_Driver.ino.bin
+   ```
+   esptool verifies each image by hash. Note: opening the serial port afterwards
+   pulses DTR/RTS and **reboots the board** — wait ~10s for boot ("missionPlay
+   finished" on the console) before sending commands.
+8. **Restore the Pi's UART TX**: `ssh rover 'pinctrl set 14 a4'`.
 
 ## Post-flash verification (SAFETY-CRITICAL — wheels off the ground)
 

@@ -94,6 +94,6 @@ on the Mac / in CI and the rover never depends on it.
 - [x] ESP32 telemetry read-back (typed `/rover/telemetry` + `/rover/battery`)
 - [x] Web dashboard: camera + live telemetry + drive pad / lights / OLED / e-stop
 - [x] Pi-side speed loop (`wheel_trim`) over the open-loop firmware
-- [ ] Reflash `ugv_base_general` → trustworthy IMU (roll/pitch/yaw), then `IMU_TRUSTED=true`
+- [x] Reflash `ugv_base_general` v0.95 + our patch (correct geometry, yaw/temp fields; board turned out to have no QMI8658 → IMU compiled out, see `docs/FIRMWARE.md`)
 - [ ] `ugv_perception`: cat detector → publishes detections (boxes onto the dashboard overlay)
 - [ ] `ugv_behavior`: turn detections into `/cmd_vel` (follow the cat)

@@ -28,15 +28,16 @@ drop is accepted (mitigated by e-stop + board heartbeat); the microSD is failing
 - **0.1 Replace the failing microSD** (or migrate to USB-SSD). Reflash Pi OS,
   run `scripts/bootstrap.sh`, re-apply the camera udev rule — and commit that
   rule into `bootstrap.sh`/`PI_SETUP.md` so a fresh Pi gets it automatically.
-- **0.2 Reflash the ESP32** — procedure prepared, see **`docs/REFLASH.md`**:
-  build `ugv_base_general` @ `d308df9` (v0.95) + `firmware/ugv-rover.patch`
-  (3 lines: UGV Rover geometry at boot, keep our motor direction, WiFi AP off).
-  Fixes the IMU (native QMI8658+AK09918 drivers) and adds yaw+temp to feedback.
-  Prebuilt repo bins are stale (v0.90) — source build only. Post-flash checklist
-  is safety-critical (wheels off ground: direction + feedback signs, `{"T":126}`
-  sanity with |az| ≈ 1000mg flat, dead-man). `{"T":127}` calibration is a no-op
-  in this firmware — dropped. Then flip `IMU_TRUSTED` in `webapp/app.js` and
-  drop the dashboard warning badge.
+- **0.2 Reflash the ESP32 — DONE 2026-07-02** (`docs/REFLASH.md`): flashed
+  `ugv_base_general` v0.95 (`d308df9`) + `firmware/ugv-rover.patch` (UGV Rover
+  geometry at boot, our motor direction, WiFi AP off, IMU compiled out).
+  Verified wheels-off: direction, encoder scale, dead-man, `y`/`temp` in
+  telemetry, full stack at 20Hz. **Discovery: this board has no QMI8658** (older
+  rev, almost certainly ICM20948) — the old "broken IMU" was a chip/driver
+  mismatch, and a working IMU is NOT possible with stock firmware on this board.
+  `IMU_TRUSTED` stays false. **New optional task 0.2b**: custom ICM20948 read
+  path in the sketch feeding the existing AHRS fusion (Adafruit driver already a
+  dependency) — the only route to real roll/pitch/yaw short of new hardware.
 - **0.3 Ground-tune `wheel_trim`** on tile + carpet (trim_ki / trim_limit);
   re-measure with `scripts/diag_latency.py`.
 

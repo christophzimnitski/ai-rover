@@ -1,3 +1,31 @@
+diff --git a/General_Driver/IMU_ctrl.h b/General_Driver/IMU_ctrl.h
+index 15a80dc..9a6db1b 100644
+--- a/General_Driver/IMU_ctrl.h
++++ b/General_Driver/IMU_ctrl.h
+@@ -8,12 +8,23 @@ IMU_ST_SENSOR_DATA stMagnRawData;
+ float temp;
+ 
+ 
++// This board revision has no QMI8658 (WhoAmI reads 0xff on both addresses);
++// the I2C timeouts from a missing chip throttle the whole main loop, so the
++// IMU stack is compiled out. r/p/y stay 0.0 in feedback.
++#define IMU_ABSENT
++
+ void imu_init() {
++#ifndef IMU_ABSENT
+ 	imuInit();
++#endif
+ }
+ 
+ 
+ void updateIMUData() {
++#ifdef IMU_ABSENT
++  temp = temperatureRead();
++  return;
++#endif
+ 	imuDataGet( &stAngles, &stGyroRawData, &stAccelRawData, &stMagnRawData);
+ 
+ 	ax = stAccelRawData.X;
 diff --git a/General_Driver/movtion_module.h b/General_Driver/movtion_module.h
 index 968664d..47be2d3 100644
 --- a/General_Driver/movtion_module.h
