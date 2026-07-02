@@ -41,6 +41,11 @@ heartbeat); IMU yaw is a relative heading, not compass truth (uncalibrated mag).
   tilt tests verified roll/pitch/yaw signs, tracking, and stability;
   `IMU_TRUSTED` flipped true. Yaw = relative heading only (uncalibrated mag);
   details in `docs/FIRMWARE.md`.
+- **0.2c Gate the IMU fusion against motor interference** — attitude is
+  currently trustworthy at rest ONLY: running motors make r/p/y swing wildly
+  (vibration → accel noise; motor magnetic fields → mag garbage that
+  cross-couples into all axes). Fix = sample gating + retune in the sketch,
+  app0-only reflash; full design in `docs/FIRMWARE.md` "Known limitation".
 - **0.3 Ground-tune `wheel_trim`** on tile + carpet (trim_ki / trim_limit);
   re-measure with `scripts/diag_latency.py`.
 

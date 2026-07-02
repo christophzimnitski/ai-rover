@@ -80,6 +80,30 @@ ICM20948 read path (Adafruit driver, already a build dependency):
   `{"T":127}` calibration remains a **no-op** (routine commented out at the
   source).
 
+### Known limitation: attitude is garbage while the MOTORS run (task 0.2c)
+
+Ground-observed 2026-07-02 (wheels-off, body stationary, wheels spinning):
+r/p/y swing wildly even though the rover isn't moving. Two mechanisms, both
+motor-driven:
+
+1. **Vibration → accel noise.** The fusion trusts the accelerometer hard
+   (Kp = 4.5); vibration makes the gravity estimate jump, dragging roll/pitch.
+2. **Motor magnetic fields → mag garbage.** The mag already reads ~2× earth
+   field at rest (hard iron); running motors add a large *varying* field. Mag
+   error cross-couples into ALL axes in `imuAHRSupdate` (and can wind the
+   ±20°/s bias integrals, so garbage persists briefly after motors stop).
+
+So: attitude is trustworthy **at rest only** until fixed. The fix is firmware
+sample gating in `IMU_ctrl.h`/`IMU.cpp` (sketch-only → app0-only reflash):
+
+* skip the accel correction when `| |a| − 1g |` exceeds a window (pass gyro-only
+  integration for that sample) — standard vibration rejection;
+* skip the mag correction when mag magnitude leaves a band around its at-rest
+  baseline (learned at boot) — standard motor-interference rejection;
+* consider Kp ≈ 1.0 and a smaller integral clamp while at it;
+* verify on the bench: readings must stay put with wheels spinning at various
+  speeds, still track real tilts, and recover instantly when motors stop.
+
 ## Historical: the old firmware's IMU readings (pre-reflash)
 
 Probed flat on the bench, `{"T":126}` returns:
