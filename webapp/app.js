@@ -21,7 +21,9 @@ var SNAPSHOT_URL = 'http://' + HOST + ':8080/snapshot?topic=/camera/image_raw';
 var TRACK_WIDTH = 0.175;   // m — matches driver_params.yaml; for DISPLAYED angular velocity
 var MAX_WHEEL = 0.5;       // m/s — {"T":1} saturation; bar/sparkline scaling
 var MAX_ANGULAR = 2.4;     // rad/s at full pad deflection (matches teleop feel)
-var DRIVE_RATE_MS = 100;   // 10Hz /web_cmd_vel while the pad/keys are active
+var DRIVE_RATE_MS = 50;    // 20Hz /web_cmd_vel while the pad/keys are active — same cadence
+                           // as the gamepad, with headroom if the driver's cmd_timeout or
+                           // the board heartbeat window are ever tightened
 var IMU_TRUSTED = false;   // stock firmware fusion is broken (dead accel Z) — flip to
                            // true after reflashing ugv_base_general (docs/FIRMWARE.md)
 

@@ -1,82 +1,109 @@
 # Rover roadmap
 
-Living plan for the Waveshare UGV Rover. End goal: an untethered rover whose
-camera recognizes the cat. Architecture principle: **everything talks to
-`/cmd_vel`** (`geometry_msgs/Twist`); the `ugv_driver` node is the only thing that
-speaks the ESP32's serial JSON, and it never changes as we add capability on top.
+Living plan for the Waveshare UGV Rover. End goal: **full parity with the stock
+Waveshare app** (video, driving, lights, OLED, media capture, vision features)
+rebuilt on our modular ROS 2 stack — plus what the stock app never had: pluggable
+custom vision models and a **control panel where every feature can be enabled,
+disabled, and tuned**. The rover ultimately recognizes and follows the cat.
 
-## Where we are (2026-07-01)
+Architecture rules stand: every concern is its own independent service behind a
+typed seam; `ugv_driver` is the only thing speaking the ESP32's serial JSON; the
+webapp stays a thin zero-dependency layer (display + forwarding user intent);
+heavy work (vision, media, logging) lives in separate services.
 
-- **Stages 0–4 done. First-light achieved.** `/cmd_vel → ugv_driver → serial →
-  ESP32 → motors` verified, including keyboard teleop.
-- Hardware healthy: battery **12.25 V**, bidirectional serial link, encoder
-  feedback (`{"T":1001,...,"L","R","v"}`) confirmed.
-- Correct UART on this Pi 5 is **`/dev/ttyAMA0`** (compose maps it to the
-  container's `/dev/serial0`). See `docs/PI_SETUP.md` for the gotcha.
+## Where we are (2026-07-02)
 
-## Issues found at first-light (marked)
+Done: driver + gamepad teleop (self-healing), typed telemetry seam, camera
+service (exposure pinned), webbridge, dashboard v2 (video, telemetry, drive pad,
+e-stop, lights, OLED, link health), Pi-side speed loop (`wheel_trim`) over the
+open-loop firmware, board heartbeat armed, video path single-encode
+(`ros_compressed`, q60). Firmware ground truth documented in `docs/FIRMWARE.md`.
 
-| # | Issue | Status |
-|---|-------|--------|
-| A | Won't turn at low speed (static friction needs more current) | **Fixed** — `min_wheel_speed` in the driver bumps any non-zero wheel command up to a floor (default 0.10 m/s). Tune the value on the floor. |
-| B | ~1 s stop lag with keyboard teleop | **Resolved by design** — root cause is that terminals have no key-up event over SSH, so teleop can't detect release. The Bluetooth gamepad (next milestone) publishes continuously and zeroes instantly on stick-release. Not worth band-aiding the keyboard. |
-| C | "Holonomic mode" confusing | **N/A** — that mode is for mecanum/omni robots that strafe sideways (`linear.y`). Ours is differential drive and the driver ignores `linear.y` by design. Ignore holonomic mode. |
+Known constraints: board IMU is broken at the source until reflashed (roll pins
+at 90°); wheel speed feedback quantized ~0.15 m/s; controller-runaway on dongle
+drop is accepted (mitigated by e-stop + board heartbeat); the microSD is failing.
 
-## Next steps (ordered)
+## Phase 0 — Hardware foundation (do first)
 
-### 1. Gamepad teleop — the chosen input (NEXT)
-Replace keyboard teleop with a generic Bluetooth controller. Fixes issue B and
-gives analog speed control.
-- Pair the controller on the Pi host: `bluetoothctl` → `scan on` → `pair`/`trust`/
-  `connect`; confirm it shows up as `/dev/input/js0` (`ls /dev/input/`, test with
-  `jstest`).
-- Add ROS packages to the image: `ros-jazzy-joy` + `ros-jazzy-teleop-twist-joy`.
-- Give the container access to the pad: pass `/dev/input` (add to compose
-  `devices:` or bind-mount `/dev/input`).
-- `joy_node` → `teleop_twist_joy` → `/cmd_vel`. Add a `joystick.launch.py` +
-  a config mapping: left stick Y = `linear.x`, right stick X = `angular.z`,
-  a deadman/turbo button, and a stick deadzone (so centred = exact zero).
-- Map it into `rover.launch.py` (or a second launch file) so `docker compose up`
-  brings up driver + joy together.
+- **0.1 Replace the failing microSD** (or migrate to USB-SSD). Reflash Pi OS,
+  run `scripts/bootstrap.sh`, re-apply the camera udev rule — and commit that
+  rule into `bootstrap.sh`/`PI_SETUP.md` so a fresh Pi gets it automatically.
+- **0.2 Reflash the ESP32** with current `ugv_base_general` (fixes the IMU,
+  adds yaw+temp to feedback). Post-flash checklist is safety-critical:
+  drive-direction + feedback signs (type defaults may differ — see the T:900
+  warning in `docs/FIRMWARE.md`), `{"T":126}` sanity (az ≈ ±1g flat),
+  `{"T":127}` calibration, boot-mission state. Then flip `IMU_TRUSTED` in
+  `webapp/app.js` and drop the dashboard warning badge.
+- **0.3 Ground-tune `wheel_trim`** on tile + carpet (trim_ki / trim_limit);
+  re-measure with `scripts/diag_latency.py`.
 
-### 2. Tune on the floor
-- `min_wheel_speed`: lower it toward the point where wheels *just* reliably start.
-- `angular_gain`: raise for snappier turns if needed.
-- Confirm the 0.175 m `track_width` gives roughly correct turn rates.
+## Phase 1 — Control-panel foundation (feature flags)
 
-### 3. Odometry + robot model (foundation for autonomy)
-- Publish wheel **odometry** from the ESP32 encoder feedback (`{"T":1001}` L/R) →
-  `/odom` + `tf` (odom→base_link). This is what navigation/SLAM needs.
-- Minimal **URDF** (base + wheels) for `robot_state_publisher` and rviz.
+- **1.1 Design the feature registry.** Convention: every feature is owned by one
+  service and exposed as ROS parameters (`enabled` + tuning knobs), discoverable
+  and settable from the browser via rosapi service calls over the existing
+  rosbridge (zero new dependencies). A common `ServiceStatus` heartbeat topic
+  per service (generalizing `/rover/link`).
+- **1.2 Parameterize existing nodes** (driver: trim/mux/heartbeat knobs; camera:
+  exposure values) so the panel can control them live.
+- **1.3 Webapp Control tab**: registry-driven list of every feature with
+  toggle/slider/select, live get/set via rosbridge; explicit **persist** button
+  backed by a small config-writer node that updates the bind-mounted yamls.
+- **1.4 Service-level on/off**: compose profiles documented; the panel shows
+  per-service health (it does not control Docker by design).
 
-### 4. Camera bring-up
-- Add the Pi camera (or USB cam) as a ROS node publishing `sensor_msgs/Image`
-  (`image_transport`), viewable in rviz / rqt.
+## Phase 2 — Stock-app parity: non-vision features
 
-### 5. Cat perception
-- On-device detection (lightweight model, e.g. a small YOLO/MobileNet) node that
-  consumes the image topic and publishes cat detections (bounding box / bearing).
-- Mind the Pi 5's compute/thermal limits (heatsink+fan; consider an accelerator).
+- **2.1 `system` service**: `/rover/system` @1Hz (CPU, RAM, temp, disk, WiFi
+  RSSI, uptime) from `/proc`+`/sys`, zero-dep; dashboard panel; calibrated 3S
+  battery %.
+- **2.2 `media` service**: photo capture + video recording from
+  `/camera/image_raw/compressed`, gallery served over its own HTTP port,
+  storage on the (new) SSD; webapp Gallery tab with record/photo buttons.
+- **2.3 OLED status rotation** (IP / battery / uptime) as a panel-toggleable
+  feature of the system service.
+- **2.4 Audio interaction** — optional, only if speaker hardware is added.
 
-### 6. Follow behavior
-- Behavior node: detection → a `/cmd_vel` command that turns toward and approaches
-  the cat. Because it publishes `/cmd_vel`, the driver is untouched.
+## Phase 3 — Vision platform (models, including your own)
 
-### 7. Untethered autonomy hardening
-- Battery monitoring/telemetry (voltage already available), low-battery safe-stop.
-- Remote access for a roaming robot: Tailscale + SSH hardening (deferred earlier).
-- Autostart our stack on boot (our replacement for the stock crontab entry).
+- **3.1 Design the detection seam**: `vision_msgs/Detection2DArray` on
+  `/rover/detections`; a `models/<name>/manifest.json` convention (framework,
+  input size, labels, thresholds) so custom models drop in without code changes.
+  Pick the minimal runtime set (OpenCV + one inference runtime).
+- **3.2 `ugv_perception` skeleton**: image in → pluggable detector → detections
+  out + FPS/status; panel controls (enable, model picker, confidence, input
+  size, frame skip).
+- **3.3 Dashboard overlay**: draw boxes/labels on the existing `<canvas
+  id="overlay">`; per-class colors; panel toggle.
+- **3.4 Parity detectors, one at a time**: motion detection (no model), color
+  tracking (HSV, panel color picker), face detection, object detection
+  (includes the cat), gesture recognition (optional), line detection (optional).
+- **3.5 Custom-model onboarding docs** + verify with one non-stock model.
 
-## Dev-environment housekeeping (independent of the above)
+## Phase 4 — Behaviors (autonomy)
 
-- Commit the dev-env changes (`scripts/setup_dev_venv.sh`, docs) + this session's
-  fixes (UART, driver, roadmap) — run the repo commit gate first.
-- PyCharm **Deployment** auto-sync Mac→Pi on save (replaces manual rsync). GUI work.
-- Optional one-click "run rover in Docker" PyCharm run configuration.
+- **4.1 Formalize the command mux** in the driver: e-stop > gamepad `/cmd_vel` >
+  `/web_cmd_vel` > `/behavior_cmd_vel`, per-source enable in the panel, and an
+  explicit "autonomy armed" latch (panel switch, OLED indication).
+- **4.2 Follow-target behavior**: detections → bearing/size P-controller →
+  `/behavior_cmd_vel`; target class, gains, speed caps, lost-target stop — all
+  panel-tunable. This is the cat-following milestone.
+- **4.3 Line-follow behavior** (optional stock parity).
+- **4.4 Safety validation session**: e-stop drills, watchdog/runaway tests,
+  heartbeat pull-the-plug test — before any unattended autonomy.
+
+## Phase 5 — Polish & ops
+
+- **5.1 Webapp reorg into tabs** (Drive / Control / Gallery / System), still
+  zero-dependency.
+- **5.2 Untethered hardening**: Tailscale access, low-battery safe-stop behavior
+  (auto-halt + OLED + light blink), boot-time health OLED line.
+- **5.3 Latency check on WiFi roaming**; evaluate WebRTC only if MJPEG falls
+  short.
+- **5.4 Docs pass** (`PI_SETUP.md`, `COMMANDS.md`, fresh-Pi restore drill).
 
 ## Reference: the stock Waveshare app (`~/ugv_rpi`, read-only)
-Keep it as documentation only — do **not** edit/delete it. It holds the confirmed
-ESP32 `T`-code protocol and a capabilities notebook. It autostarts from the user
-crontab (`@reboot app.py` + `start_jupyter.sh`); stop it with `kill <pid>` (find via
-`pgrep -f 'ugv_rpi/[a]pp.py'`) when it would contend for hardware. It is a
-monolithic Flask/WebSocket app — the opposite of our modular ROS 2 approach.
+
+Keep as documentation only — do **not** edit/delete it. It holds the confirmed
+T-code protocol usage and the stock feature list we are matching. Its crontab
+autostart stays disabled so it never contends for the UART/camera.
