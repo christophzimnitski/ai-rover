@@ -18,10 +18,11 @@
 joy_node:
   ros__parameters:
     device_id: 0          # 0 = /dev/input/js0 (first joystick)
-    deadzone: 0.15        # fraction of range treated as centre -> exact 0.0. Raised 0.10->0.15 to
-                          # swallow occasional stick DRIFT: min_wheel_speed (0.10) would otherwise
-                          # amplify any leaked drift into a 0.10 m/s creep ("won't stop"). Lower it
-                          # if low-speed fine control suffers.
+    deadzone: 0.10        # fraction of range treated as centre -> exact 0.0. Back down from 0.15:
+                          # that was guarding against min_wheel_speed (then 0.10) turning leaked
+                          # stick drift into a constant creep — the floor is now 0 (wheel_trim
+                          # replaces it, and trim hard-zeros on a zero command), so a tighter
+                          # deadzone buys finer low-speed control. Raise again if drift creeps back.
     autorepeat_rate: 20.0 # Hz; republish /joy even when idle so /cmd_vel keeps feeding
                           # the driver watchdog (cmd_timeout 0.5s) while the deadman is held
 
