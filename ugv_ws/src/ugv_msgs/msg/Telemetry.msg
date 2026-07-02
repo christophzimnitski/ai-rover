@@ -5,8 +5,8 @@ std_msgs/Header header
 
 float32 left_speed    # m/s, left tread (board "L", encoder-derived)
 float32 right_speed   # m/s, right tread (board "R", encoder-derived)
-float32 roll          # deg, board-reported roll (board "r"); UNRELIABLE on stock
-float32 pitch         # deg, board-reported pitch (board "p"); firmware (see docs/FIRMWARE.md)
-float32 yaw           # deg, board-reported yaw (board "y"); 0.0 on firmware that lacks it
+float32 roll          # deg, board-reported roll (board "r"); ICM20948 fusion
+float32 pitch         # deg, board-reported pitch (board "p"); (see docs/FIRMWARE.md)
+float32 yaw           # deg, board-reported yaw (board "y"); RELATIVE heading, not compass
 float32 voltage       # V, battery (board "v")
-float32 temp          # degC-ish, ESP32 die temp (board "temp"); 0.0 when absent
+float32 temp          # degC, IMU die temp (ESP32 internal if no IMU); 0.0 if firmware omits it

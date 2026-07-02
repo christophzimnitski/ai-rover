@@ -24,8 +24,8 @@ var MAX_ANGULAR = 2.4;     // rad/s at full pad deflection (matches teleop feel)
 var DRIVE_RATE_MS = 50;    // 20Hz /web_cmd_vel while the pad/keys are active — same cadence
                            // as the gamepad, with headroom if the driver's cmd_timeout or
                            // the board heartbeat window are ever tightened
-var IMU_TRUSTED = false;   // stock firmware fusion is broken (dead accel Z) — flip to
-                           // true after reflashing ugv_base_general (docs/FIRMWARE.md)
+var IMU_TRUSTED = true;    // ICM20948 read path verified 2026-07-02 (docs/FIRMWARE.md);
+                           // yaw is a relative heading (uncalibrated mag), not compass truth
 
 // ---- tiny rosbridge client (direct WebSocket, auto-reconnect) ------------------
 function Rosbridge(url, onStatus) {

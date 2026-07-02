@@ -21,13 +21,16 @@ frame. The prebuilt bin would leave us with roughly what we already have.
 
 > **OUTCOME (2026-07-02): flashed and verified.** One major discovery during the
 > flash: **this board has no QMI8658** — `WhoAmI` reads `0xff` on both I2C
-> addresses, so it is the older board revision (almost certainly ICM20948).
-> The stock firmware hangs its main loop on the missing chip's I2C timeouts,
-> so the patch grew a 4th change that compiles the IMU out (`IMU_ABSENT` in
-> `IMU_ctrl.h`): roll/pitch/yaw are clean 0.0 in telemetry, `temp` is the ESP32
-> internal sensor. **A working IMU is not achievable on this board with stock
-> firmware** — it would need a custom ICM20948 driver added to the sketch
-> (the Adafruit lib is already a dependency), tracked as a possible follow-up.
+> addresses. It is the older board revision with an **ICM20948 at 0x68**
+> (confirmed live later the same day). The stock firmware hangs its main loop
+> on the missing QMI8658's I2C timeouts, so the patch first compiled the IMU
+> out (`IMU_ABSENT`), then grew the proper fix the same day (**task 0.2b**): a
+> custom ICM20948 read path in `IMU_ctrl.h` feeding the stock AHRS fusion —
+> runtime-probed, so a board without the chip degrades to the IMU-absent
+> behavior instead of hanging. Bench tilt tests verified roll/pitch/yaw
+> (details + caveats in `docs/FIRMWARE.md`). The 0.2b flash was an
+> **app0-only write** (`write_flash 0x10000` — no erase, bootloader/partitions/
+> LittleFS untouched), which is the cheap path for any future sketch-only change.
 
 ### Why each line of the patch (all compile-time defaults)
 
@@ -51,9 +54,14 @@ The patch (applies cleanly to `d308df9` with `git apply`):
 3. `wifi_ctrl.h`: `byte WIFI_MODE_ON_BOOT = 1;` → `0` — the stock default would
    broadcast an open AP (`UGV` / `12345678`) with a web control page on every boot.
    Off; can still be enabled over UART later if ever wanted.
-4. `IMU_ctrl.h`: `IMU_ABSENT` guard — this board revision has no QMI8658 (see
-   outcome note above); without the guard the missing chip's I2C timeouts
-   throttle the entire command loop to uselessness.
+4. `IMU_ctrl.h` (+ `IMU.h`/`IMU.cpp`): the QMI8658+AK09918 stack is replaced by
+   an **ICM20948 read path** — this board revision has no QMI8658 (see outcome
+   note above), and without a guard the missing chip's I2C timeouts throttle
+   the entire command loop to uselessness. The chip is probed once at boot
+   (bounded WHO_AM_I at 0x68/0x69): found → 100Hz reads into the stock Mahony
+   fusion (with measured `dt` and clamped persistent bias integrals); not
+   found → the bus is never touched again and r/p/y stay 0.0. Details in
+   `docs/FIRMWARE.md`.
 
 The **"never send `{"T":900}`" rule still stands** after reflashing: everything is
 compiled in; a runtime `T:900` with `main:1` would silently load the wrong geometry
@@ -165,9 +173,9 @@ Run from the **Pi host** (rover compose service still stopped, port is
    - flat: `|az| ≈ 1000`, `ax`,`ay` ≈ 0 (±100), `r`,`p` ≈ 0 (±5°), gyro ≈ 0 (±3),
      `mx,my,mz` non-zero and changing when the rover is rotated
    - tilt the rover ~30° and hold: `r`/`p` follow and are stable (no drift to 90°)
-   - a `qmi8658_init fail` on the serial console or all-zero readings = the board
-     is an older IMU revision; the reflash still stands (drive/telemetry unaffected)
-     but roll/pitch stay untrusted — do NOT flip `IMU_TRUSTED`.
+   - the boot console prints the probe verdict: `imu: ICM20948 online at 0x68`
+     vs `imu: no ICM20948 at 0x68/0x69, IMU disabled`. Disabled = all-zero
+     r/p/y, drive/telemetry unaffected — do NOT flip `IMU_TRUSTED`.
 3. **Feedback frame**: `{"T":1001}` frames now carry `L,R,r,p,y,temp,v`.
 4. **Drive direction + scale** (THE critical test, wheels OFF the ground):
    ```bash

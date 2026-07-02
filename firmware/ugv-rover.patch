@@ -1,31 +1,209 @@
+diff --git a/General_Driver/IMU.cpp b/General_Driver/IMU.cpp
+index fbe1420..9e3ed37 100644
+--- a/General_Driver/IMU.cpp
++++ b/General_Driver/IMU.cpp
+@@ -1,7 +1,7 @@
+ #include "IMU.h"
+ 
+ void calibrateMagn();
+-void imuAHRSupdate(float gx, float gy, float gz, float ax, float ay, float az, float mx, float my, float mz);
++void imuAHRSupdate(float gx, float gy, float gz, float ax, float ay, float az, float mx, float my, float mz, float halfT);
+ float invSqrt(float x);
+ 
+ /******************************************************************************
+@@ -84,8 +84,8 @@ void imuDataGet(EulerAngles *pstAngles,
+   MotionVal[8]=pstMagnRawData->s16Z;
+ 
+   imuAHRSupdate((float)MotionVal[0] * 0.0175, (float)MotionVal[1] * 0.0175, (float)MotionVal[2] * 0.0175,
+-                (float)MotionVal[3], (float)MotionVal[4], (float)MotionVal[5], 
+-                (float)MotionVal[6], (float)MotionVal[7], MotionVal[8]);
++                (float)MotionVal[3], (float)MotionVal[4], (float)MotionVal[5],
++                (float)MotionVal[6], (float)MotionVal[7], MotionVal[8], 0.024f);
+ 
+   pstAngles->pitch = asin(-2 * q1 * q3 + 2 * q0* q2)* 57.3; // pitch
+   pstAngles->roll = atan2(2 * q2 * q3 + 2 * q0 * q1, -2 * q1 * q1 - 2 * q2* q2 + 1)* 57.3; // roll
+@@ -102,13 +102,15 @@ void imuDataGet(EulerAngles *pstAngles,
+   return;  
+ }
+ 
+-void imuAHRSupdate(float gx, float gy, float gz, float ax, float ay, float az, float mx, float my, float mz) 
++void imuAHRSupdate(float gx, float gy, float gz, float ax, float ay, float az, float mx, float my, float mz, float halfT)
+ {
+   float norm;
+   float hx, hy, hz, bx, bz;
+   float vx, vy, vz, wx, wy, wz;
+-  float exInt = 0.0, eyInt = 0.0, ezInt = 0.0;
+-  float ex, ey, ez, halfT = 0.024f; /*half the sample period*/
++  // persistent so the Ki term can actually absorb gyro bias; clamped so it
++  // can never wind up past ~20 deg/s of correction
++  static float exInt = 0.0, eyInt = 0.0, ezInt = 0.0;
++  float ex, ey, ez;
+ 
+   float q0q0 = q0 * q0;
+   float q0q1 = q0 * q1;
+@@ -153,9 +155,9 @@ void imuAHRSupdate(float gx, float gy, float gz, float ax, float ay, float az, f
+ 
+   if(ex != 0.0f && ey != 0.0f && ez != 0.0f)
+   {
+-    exInt = exInt + ex * Ki * halfT;
+-    eyInt = eyInt + ey * Ki * halfT;  
+-    ezInt = ezInt + ez * Ki * halfT;
++    exInt = constrain(exInt + ex * Ki * halfT, -0.35f, 0.35f);
++    eyInt = constrain(eyInt + ey * Ki * halfT, -0.35f, 0.35f);
++    ezInt = constrain(ezInt + ez * Ki * halfT, -0.35f, 0.35f);
+ 
+     gx = gx + Kp * ex + exInt;
+     gy = gy + Kp * ey + eyInt;
+diff --git a/General_Driver/IMU.h b/General_Driver/IMU.h
+index 198ad33..4db4df4 100644
+--- a/General_Driver/IMU.h
++++ b/General_Driver/IMU.h
+@@ -25,7 +25,7 @@ void imuDataGet(EulerAngles *pstAngles,
+                 IMU_ST_SENSOR_DATA_FLOAT *pstGyroRawData,
+                 IMU_ST_SENSOR_DATA_FLOAT *pstAccelRawData,
+                 IMU_ST_SENSOR_DATA *pstMagnRawData); 
+-void imuAHRSupdate(float gx, float gy, float gz, float ax, float ay, float az, float mx, float my, float mz);
++void imuAHRSupdate(float gx, float gy, float gz, float ax, float ay, float az, float mx, float my, float mz, float halfT);
+ float invSqrt(float x);
+ 
+ #endif
 diff --git a/General_Driver/IMU_ctrl.h b/General_Driver/IMU_ctrl.h
-index 15a80dc..9a6db1b 100644
+index 15a80dc..867f0e5 100644
 --- a/General_Driver/IMU_ctrl.h
 +++ b/General_Driver/IMU_ctrl.h
-@@ -8,12 +8,23 @@ IMU_ST_SENSOR_DATA stMagnRawData;
+@@ -8,31 +8,105 @@ IMU_ST_SENSOR_DATA stMagnRawData;
  float temp;
  
  
 +// This board revision has no QMI8658 (WhoAmI reads 0xff on both addresses);
-+// the I2C timeouts from a missing chip throttle the whole main loop, so the
-+// IMU stack is compiled out. r/p/y stay 0.0 in feedback.
-+#define IMU_ABSENT
++// it is the older revision carrying an ICM20948 (WHO_AM_I 0xEA at 0x68/0x69),
++// so the QMI8658+AK09918 stack is replaced by an ICM20948 read path feeding
++// the same AHRS fusion. The chip is probed ONCE at boot with a bounded
++// transaction: if nothing answers, the bus is never touched again — a missing
++// chip's I2C timeouts would throttle the whole main loop — and r/p/y stay 0.0
++// with temp falling back to the ESP32 internal sensor.
++
++#define ICM20948_WHOAMI_REG 0x00
++#define ICM20948_WHOAMI_VAL 0xEA
++// Unthrottled back-to-back reads would starve the ~1ms command loop; the
++// AK09916 inside the ICM20948 tops out at 100Hz anyway.
++#define IMU_READ_INTERVAL_MS 10
++
++Adafruit_ICM20948 icm20948_imu;
++bool imuOnline = false;
++unsigned long lastImuReadMs = 0;
++unsigned long lastFusionUs = 0;
++
++extern float q0, q1, q2, q3;  // AHRS quaternion state (IMU.cpp)
++
++bool icmProbe(uint8_t addr) {
++	Wire.beginTransmission(addr);
++	Wire.write(ICM20948_WHOAMI_REG);  // bank 0 is selected out of reset
++	if (Wire.endTransmission(false) != 0) return false;
++	if (Wire.requestFrom((int)addr, 1) != 1) return false;
++	return Wire.read() == ICM20948_WHOAMI_VAL;
++}
 +
  void imu_init() {
-+#ifndef IMU_ABSENT
- 	imuInit();
-+#endif
+-	imuInit();
++	uint8_t addr;
++	if (icmProbe(0x68))      addr = 0x68;
++	else if (icmProbe(0x69)) addr = 0x69;
++	else {
++		Serial.println("imu: no ICM20948 at 0x68/0x69, IMU disabled");
++		return;
++	}
++	if (!icm20948_imu.begin_I2C(addr)) {
++		Serial.printf("imu: ICM20948 at 0x%02X failed to init, IMU disabled\r\n", addr);
++		return;
++	}
++	icm20948_imu.setAccelRange(ICM20948_ACCEL_RANGE_4_G);
++	icm20948_imu.setGyroRange(ICM20948_GYRO_RANGE_500_DPS);
++	icm20948_imu.setMagDataRate(AK09916_MAG_DATARATE_100_HZ);
++	// Every device on this bus (ICM20948, SSD1306, INA219) is 400kHz-capable,
++	// and at 100kHz one full IMU read costs ~4ms of loop time.
++	Wire.setClock(400000);
++	q0 = 1.0f; q1 = 0.0f; q2 = 0.0f; q3 = 0.0f;
++	imuOnline = true;
++	Serial.printf("imu: ICM20948 online at 0x%02X\r\n", addr);
  }
  
  
  void updateIMUData() {
-+#ifdef IMU_ABSENT
-+  temp = temperatureRead();
-+  return;
-+#endif
- 	imuDataGet( &stAngles, &stGyroRawData, &stAccelRawData, &stMagnRawData);
+-	imuDataGet( &stAngles, &stGyroRawData, &stAccelRawData, &stMagnRawData);
+-
+-	ax = stAccelRawData.X;
+-	ay = stAccelRawData.Y;
+-	az = stAccelRawData.Z;
+-
+-	mx = stMagnRawData.s16X;
+-	my = stMagnRawData.s16Y;
+-	mz = stMagnRawData.s16Z;
+-
+-	gx = stGyroRawData.X;
+-	gy = stGyroRawData.Y;
+-	gz = stGyroRawData.Z;
+-
+-	icm_roll = stAngles.roll;
+-	icm_pitch = stAngles.pitch;
+-	icm_yaw = stAngles.yaw;
+-
+-  temp = temperatureRead();
++	if (!imuOnline) {
++		temp = temperatureRead();
++		return;
++	}
++	unsigned long nowMs = millis();
++	if (nowMs - lastImuReadMs < IMU_READ_INTERVAL_MS) return;
++	lastImuReadMs = nowMs;
++
++	sensors_event_t accelEvt, gyroEvt, tempEvt, magEvt;
++	if (!icm20948_imu.getEvent(&accelEvt, &gyroEvt, &tempEvt, &magEvt)) return;
++
++	// Adafruit reports SI units (m/s^2, rad/s, uT). The fusion normalizes
++	// accel and mag, so only the gyro units (rad/s) and a consistent frame
++	// matter. The AK09916 mag frame is (x, -y, -z) of the accel/gyro frame.
++	float fmx = magEvt.magnetic.x;
++	float fmy = -magEvt.magnetic.y;
++	float fmz = -magEvt.magnetic.z;
++
++	unsigned long nowUs = micros();
++	float dt = (lastFusionUs == 0) ? 0.01f : (nowUs - lastFusionUs) * 1e-6f;
++	lastFusionUs = nowUs;
++	if (dt > 0.05f) dt = 0.05f;
++
++	imuAHRSupdate(gyroEvt.gyro.x, gyroEvt.gyro.y, gyroEvt.gyro.z,
++	              accelEvt.acceleration.x, accelEvt.acceleration.y, accelEvt.acceleration.z,
++	              fmx, fmy, fmz, dt * 0.5f);
++
++	icm_pitch = asin(-2 * q1 * q3 + 2 * q0 * q2) * 57.3;
++	icm_roll  = atan2(2 * q2 * q3 + 2 * q0 * q1, -2 * q1 * q1 - 2 * q2 * q2 + 1) * 57.3;
++	icm_yaw   = atan2(-2 * q1 * q2 - 2 * q0 * q3, 2 * q2 * q2 + 2 * q3 * q3 - 1) * 57.3;
++
++	// feedback globals keep the historical units: mg, deg/s, raw mag
++	ax = accelEvt.acceleration.x * (1000.0f / SENSORS_GRAVITY_STANDARD);
++	ay = accelEvt.acceleration.y * (1000.0f / SENSORS_GRAVITY_STANDARD);
++	az = accelEvt.acceleration.z * (1000.0f / SENSORS_GRAVITY_STANDARD);
++
++	gx = gyroEvt.gyro.x * RAD_TO_DEG;
++	gy = gyroEvt.gyro.y * RAD_TO_DEG;
++	gz = gyroEvt.gyro.z * RAD_TO_DEG;
++
++	mx = fmx;
++	my = fmy;
++	mz = fmz;
++
++	temp = tempEvt.temperature;  // IMU die temp; tracks ambient far better than the ESP32 core
+ }
  
- 	ax = stAccelRawData.X;
+ 
+@@ -74,4 +148,4 @@ void getIMUOffset() {
+ 
+ void setIMUOffset(int16_t inputX, int16_t inputY, int16_t inputZ) {
+ 
+-}
+\ No newline at end of file
++}
 diff --git a/General_Driver/movtion_module.h b/General_Driver/movtion_module.h
 index 968664d..47be2d3 100644
 --- a/General_Driver/movtion_module.h

@@ -7,12 +7,14 @@ The reflash procedure that fixes the IMU is prepared in `docs/REFLASH.md`.
 
 ## Our board's state
 
-* **REFLASHED 2026-07-02** to `ugv_base_general` v0.95 (`d308df9`) + our 4-change
-  patch (`firmware/ugv-rover.patch`, procedure in `docs/REFLASH.md`). The board now
-  boots with correct UGV Rover geometry compiled in, WiFi off, our verified motor
-  direction, and the IMU compiled out (see below). `{"T":1001}` now carries
-  `L,R,r,p,y,temp,v`. Direction, encoder scale (cmd 0.2 → meas ≈ 0.2), and the
-  board dead-man (default 3s window, driver arms 1s) were verified wheels-off.
+* **REFLASHED 2026-07-02** to `ugv_base_general` v0.95 (`d308df9`) + our patch
+  (`firmware/ugv-rover.patch`, procedure in `docs/REFLASH.md`; updated same day
+  with the ICM20948 read path, see the IMU section). The board now boots with
+  correct UGV Rover geometry compiled in, WiFi off, our verified motor
+  direction, and a **working IMU**. `{"T":1001}` now carries
+  `L,R,r,p,y,temp,v` with live attitude. Direction, encoder scale (cmd 0.2 →
+  meas ≈ 0.2), and the board dead-man (default 3s window, driver arms 1s) were
+  verified wheels-off.
   The pre-flash firmware (which predated the public repo entirely — its frame
   lacked `y`) is preserved in `firmware/stock-*.bin` (local only, gitignored).
 * The **boot mission is empty** and nothing sends `{"T":900,...}` (robot-type select)
@@ -44,22 +46,39 @@ legacy open-loop workaround; keep it 0 while trim is on.
   iteration → quantized to ~**0.15 m/s** steps. Filtering (trim's EMA) recovers
   usable resolution; per-pulse odometry would need firmware changes.
 
-## The IMU: this board revision has NO QMI8658 (resolved 2026-07-02)
+## The IMU: ICM20948, working (custom read path, 2026-07-02)
 
-The reflash solved the mystery: current `ugv_base_general` drives a QMI8658 +
-AK09918, but on our board `WhoAmI` reads `0xff` on **both** QMI8658 I2C addresses —
-the chip isn't there. This is the **older board revision** (almost certainly
-ICM20948, matching the firmware's legacy `icm_*` naming and `Adafruit_ICM20948`
-include). The historic "dead accel-Z / roll pins at 90°" garbage was a
-chip/driver mismatch, not a broken sensor. Consequences:
+This board revision has **no QMI8658** (`WhoAmI` reads `0xff` on both its I2C
+addresses) — it is the older revision carrying an **ICM20948 at I2C `0x68`**,
+confirmed live. The historic "dead accel-Z / roll pins at 90°" garbage was a
+chip/driver mismatch (stock pre-repo firmware reading the wrong chip), not a
+broken sensor: accel-Z reads a healthy ±1g today.
 
-* Stock firmware **hangs its main loop** on the missing chip's I2C timeouts, so
-  our patch compiles the IMU out (`IMU_ABSENT`): `r/p/y` are clean `0.0` in
-  telemetry, `temp` is the ESP32's internal sensor (~50°C).
-* `IMU_TRUSTED` stays `false` in `webapp/app.js`.
-* A working IMU needs a **custom ICM20948 read path** in the sketch feeding the
-  existing AHRS fusion (the Adafruit driver is already a build dependency) — a
-  candidate follow-up task, not part of Phase 0.2.
+The patch replaces the stock QMI8658+AK09918 stack in `IMU_ctrl.h` with an
+ICM20948 read path (Adafruit driver, already a build dependency):
+
+* **Runtime probe, not compile-time**: one bounded WHO_AM_I check at
+  `0x68`/`0x69` at boot. Found → init + `imu: ICM20948 online at 0x68` on the
+  console. Not found → the bus is never touched again (a missing chip's I2C
+  timeouts would throttle the whole main loop — the original stock-firmware
+  hang) and `r/p/y` stay `0.0` with `temp` = ESP32 internal.
+* Reads at **100Hz** (the AK09916 mag's max; unthrottled reads would starve
+  the ~1ms command loop), bus at 400kHz, feeding the stock Mahony fusion with
+  two of its known bugs fixed: measured `dt` instead of the hardcoded 48ms
+  period, and persistent (clamped ±20°/s) gyro-bias integral terms.
+* **Verified on the bench** (tilt tests, all four poses + upside down): r/p
+  track and hold with no drift, correct signs (positive pitch = nose down,
+  positive roll = right side down), stable through the ±90° region.
+* `temp` is the **IMU die temperature** (~37°C) — tracks ambient far better
+  than the ESP32-internal fallback (~50°C).
+* **Yaw is a relative heading, not compass truth**: converged yaw is stable
+  (±1°), but the magnetometer is uncalibrated and reads ~2× earth field
+  (hard iron from board/motors), and the fusion has no declination for our
+  location. Fine for "how much did I turn", wrong as absolute north.
+* `IMU_TRUSTED` is `true` in `webapp/app.js` since 2026-07-02.
+* `{"T":126}` returns live `{"T":1002,...}` frames (mg / deg/s / µT);
+  `{"T":127}` calibration remains a **no-op** (routine commented out at the
+  source).
 
 ## Historical: the old firmware's IMU readings (pre-reflash)
 

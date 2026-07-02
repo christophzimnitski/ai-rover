@@ -19,13 +19,13 @@ e-stop, lights, OLED, link health), Pi-side speed loop (`wheel_trim`) over the
 open-loop firmware, board heartbeat armed, video path single-encode
 (`ros_compressed`, q60). Firmware ground truth documented in `docs/FIRMWARE.md`.
 
-Known constraints: board IMU is broken at the source until reflashed (roll pins
-at 90°); wheel speed feedback quantized ~0.15 m/s; controller-runaway on dongle
-drop is accepted (mitigated by e-stop + board heartbeat); the microSD is failing.
+Known constraints: wheel speed feedback quantized ~0.15 m/s (re-measure in 0.3);
+controller-runaway on dongle drop is accepted (mitigated by e-stop + board
+heartbeat); IMU yaw is a relative heading, not compass truth (uncalibrated mag).
 
 ## Phase 0 — Hardware foundation (do first)
 
-- **0.1 Replace the failing microSD** (or migrate to USB-SSD). Reflash Pi OS,
+- **0.1 Replace the failing microSD — Done** (or migrate to USB-SSD). Reflash Pi OS,
   run `scripts/bootstrap.sh`, re-apply the camera udev rule — and commit that
   rule into `bootstrap.sh`/`PI_SETUP.md` so a fresh Pi gets it automatically.
 - **0.2 Reflash the ESP32 — DONE 2026-07-02** (`docs/REFLASH.md`): flashed
@@ -33,11 +33,14 @@ drop is accepted (mitigated by e-stop + board heartbeat); the microSD is failing
   geometry at boot, our motor direction, WiFi AP off, IMU compiled out).
   Verified wheels-off: direction, encoder scale, dead-man, `y`/`temp` in
   telemetry, full stack at 20Hz. **Discovery: this board has no QMI8658** (older
-  rev, almost certainly ICM20948) — the old "broken IMU" was a chip/driver
-  mismatch, and a working IMU is NOT possible with stock firmware on this board.
-  `IMU_TRUSTED` stays false. **New optional task 0.2b**: custom ICM20948 read
-  path in the sketch feeding the existing AHRS fusion (Adafruit driver already a
-  dependency) — the only route to real roll/pitch/yaw short of new hardware.
+  rev with an ICM20948 at 0x68) — the old "broken IMU" was a chip/driver
+  mismatch, not a broken sensor.
+- **0.2b Custom ICM20948 read path — DONE 2026-07-02**: the patch's IMU
+  compile-out became a runtime-probed ICM20948 driver feeding the stock AHRS
+  fusion (probe fails safe: no chip → no bus traffic, r/p/y = 0.0). Bench
+  tilt tests verified roll/pitch/yaw signs, tracking, and stability;
+  `IMU_TRUSTED` flipped true. Yaw = relative heading only (uncalibrated mag);
+  details in `docs/FIRMWARE.md`.
 - **0.3 Ground-tune `wheel_trim`** on tile + carpet (trim_ki / trim_limit);
   re-measure with `scripts/diag_latency.py`.
 
