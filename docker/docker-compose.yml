@@ -41,3 +41,59 @@ services:
     restart: unless-stopped
     # Default process: bring up the base driver. teleop is attached separately via `exec`.
     command: ros2 launch ugv_bringup rover.launch.py
+
+  # Camera (THE SWAPPABLE PART): USB UVC cam -> /camera/image_raw. This is the ONLY
+  # camera-specific service. To swap camera hardware, change THIS service + camera.launch.py
+  # / config/camera.yaml -- the /camera/image_raw topic and everything downstream (web layer,
+  # dashboard) never change. Reuses the ugv-rover:jazzy image (it carries usb_cam), just runs
+  # a different launch file. Kept separate from `rover` so the base stack drives on if it dies.
+  camera:
+    image: ugv-rover:jazzy      # same image as `rover`; built by the `rover` service's `build:`
+    container_name: rover-camera
+    network_mode: host          # share the DDS graph with the other services over localhost
+    ipc: host
+    devices:
+      # EMEET SmartCam C950 (USB UVC) enumerates as /dev/video0 (capture) + /dev/video1
+      # (metadata); usb_cam opens video0. The Pi's own ISP/codec nodes are video19..35 --
+      # not cameras. If a swapped-in camera lands on a different index, change this one line
+      # (check `ls /dev/video*` and `ls /dev/v4l/by-id/` after plugging it in).
+      - "/dev/video0:/dev/video0"
+    device_cgroup_rules:
+      - "c 81:* rmw"            # video4linux (char major 81) -- lets the node open the camera
+    volumes:
+      - ../ugv_ws:/ros2_ws       # same live-edited workspace (for camera.launch.py + config)
+    environment:
+      - ROS_DOMAIN_ID=0
+    restart: unless-stopped      # autostart on boot; survives the reboot independence test
+    command: ros2 launch ugv_bringup camera.launch.py
+
+  # Web transport layer (camera-agnostic, swappable panel): rosbridge + web_video_server.
+  #   rosbridge_server :9090 (JSON/WebSocket) -> roslibjs frontend subscribes /rover/telemetry
+  #   web_video_server :8080 (MJPEG over HTTP) -> <img> src for the live view (ANY image topic)
+  # A SEPARATE service from the driver, per the design: if the web layer crashes, the base
+  # rover stack keeps driving. network_mode host binds :9090/:8080 on the Pi (LAN / Tailscale).
+  webbridge:
+    image: ugv-rover:jazzy
+    container_name: rover-webbridge
+    network_mode: host
+    ipc: host
+    volumes:
+      - ../ugv_ws:/ros2_ws
+    environment:
+      - ROS_DOMAIN_ID=0
+    restart: unless-stopped
+    command: ros2 launch ugv_bringup webbridge.launch.py
+
+  # Dashboard (THIN display layer) -- its own independent service. A zero-dependency static
+  # site (vanilla HTML/JS talking rosbridge over WebSocket + an MJPEG <img>), served by the
+  # base image's python3 -- no Node/npm/build. Independent of everything else: if it dies the
+  # base stack keeps driving; if the backend dies the page just shows "stale". Browse to
+  # http://<pi>:8090/  (the page reaches rosbridge :9090 + web_video_server :8080 itself).
+  webapp:
+    image: ugv-rover:jazzy
+    container_name: rover-webapp
+    network_mode: host
+    volumes:
+      - ../webapp:/webapp:ro       # static site, live-edited from the Mac (sync.sh); read-only
+    restart: unless-stopped
+    command: python3 -m http.server 8090 --directory /webapp

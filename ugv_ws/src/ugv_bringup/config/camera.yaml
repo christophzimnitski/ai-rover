@@ -1,0 +1,30 @@
+# usb_cam parameters for the rover camera, loaded by camera.launch.py.
+#
+# SWAP-FRIENDLY: this file and camera.launch.py are the ONLY camera-specific bits of the
+# whole stack. Point video_device at a new camera (find it with `ls /dev/v4l/by-id/`), or
+# change the resolution/format here -- the /camera/image_raw seam and everything downstream
+# (web_video_server, the dashboard) stay exactly the same.
+#
+# EXPOSURE IS NOT SET HERE. usb_cam does not reliably apply exposure/auto_exposure to the
+# C950 (it leaves the cam in auto and comes up way underexposed), so brightness is pinned
+# OUTSIDE this file -- camera.launch.py sets it with v4l2-ctl after the stream starts.
+# Retune exposure there, not here.
+#
+# EMEET SmartCam C950: a 1080p UVC webcam. Over USB it streams MJPG, so we capture MJPG and
+# decode to RGB on the Pi (pixel_format mjpeg2rgb) -- raw YUYV at this resolution would blow
+# past USB2 bandwidth. If usb_cam ever fails to start (unsupported format / bandwidth), drop
+# image_width/height to 640x480.
+#
+# `/**` applies these params to the node whatever its name/namespace (camera.launch.py puts
+# it under the `camera` namespace, so it publishes /camera/image_raw + /camera/camera_info).
+/**:
+  ros__parameters:
+    video_device: "/dev/video0"
+    pixel_format: "mjpeg2rgb"   # C950 streams MJPG; decode to rgb8 on the Pi
+    image_width: 1280
+    image_height: 720
+    framerate: 30.0
+    io_method: "mmap"
+    frame_id: "camera"
+    camera_name: "emeet_c950"
+    camera_info_url: ""

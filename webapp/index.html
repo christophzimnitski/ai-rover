@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Rover Dashboard</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <!--
+    Rover Dashboard — a THIN, zero-dependency display layer (see the modularity rule).
+    No frameworks, no build, no bundled libraries: it talks to rosbridge directly over a
+    WebSocket and shows the MJPEG feed in an <img>. It only DISPLAYS; the driver, camera,
+    web transport, and (future) AI are all independent services it merely reads from.
+  -->
+  <header>
+    <h1>Rover Dashboard</h1>
+    <div class="pills">
+      <span id="pill-ros" class="pill down">rosbridge</span>
+      <span id="pill-telem" class="pill down">telemetry</span>
+      <span id="pill-cam" class="pill down">camera</span>
+    </div>
+  </header>
+
+  <main>
+    <!-- CAMERA (with an overlay canvas already in place for the AI's bounding boxes) -->
+    <section class="panel panel-video">
+      <h2>Camera <small>/camera/image_raw</small></h2>
+      <div class="video-wrap">
+        <img id="cam" alt="camera stream" />
+        <canvas id="overlay"></canvas>
+      </div>
+    </section>
+
+    <!-- ATTITUDE: roll (skew) + pitch, as an artificial horizon + numerics -->
+    <section class="panel">
+      <h2>Attitude <small>roll / pitch</small></h2>
+      <div class="attitude">
+        <svg id="horizon" viewBox="-100 -100 200 200" class="horizon" aria-hidden="true">
+          <defs><clipPath id="clip"><circle cx="0" cy="0" r="92" /></clipPath></defs>
+          <g clip-path="url(#clip)">
+            <g id="horizon-g">
+              <rect x="-300" y="-300" width="600" height="300" class="sky" />
+              <rect x="-300" y="0" width="600" height="300" class="ground" />
+              <line x1="-300" y1="0" x2="300" y2="0" class="horizon-line" />
+              <g class="ladder">
+                <line x1="-28" y1="-40" x2="28" y2="-40" />
+                <line x1="-18" y1="-20" x2="18" y2="-20" />
+                <line x1="-18" y1="20" x2="18" y2="20" />
+                <line x1="-28" y1="40" x2="28" y2="40" />
+              </g>
+            </g>
+          </g>
+          <circle cx="0" cy="0" r="92" class="bezel" />
+          <path d="M-30 0 L-8 0 M8 0 L30 0 M0 -6 L0 6" class="crosshair" />
+        </svg>
+        <div class="readouts">
+          <div class="ro"><span class="k">Roll</span><span class="v" id="v-roll">–</span><span class="u">°</span></div>
+          <div class="ro"><span class="k">Pitch</span><span class="v" id="v-pitch">–</span><span class="u">°</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- MOTION: measured wheel speeds + derived body velocity + sparkline -->
+    <section class="panel">
+      <h2>Motion <small>wheel speeds</small></h2>
+      <div class="rows">
+        <div class="bar-row"><span class="k">Left</span><div class="bar"><i id="bar-left"></i></div><span class="v" id="v-left">–</span><span class="u">m/s</span></div>
+        <div class="bar-row"><span class="k">Right</span><div class="bar"><i id="bar-right"></i></div><span class="v" id="v-right">–</span><span class="u">m/s</span></div>
+      </div>
+      <div class="grid2">
+        <div class="stat"><span class="k">Linear</span><span class="v" id="v-lin">–</span><span class="u">m/s</span></div>
+        <div class="stat"><span class="k">Angular</span><span class="v" id="v-ang">–</span><span class="u">rad/s</span></div>
+      </div>
+      <canvas id="spark" class="spark" width="480" height="90"></canvas>
+    </section>
+
+    <!-- POWER: battery voltage -->
+    <section class="panel">
+      <h2>Power <small>/rover/battery</small></h2>
+      <div class="battery">
+        <div class="bar big"><i id="bar-batt" class="ok"></i></div>
+        <div class="stat big"><span class="v" id="v-volt">–</span><span class="u">V</span></div>
+      </div>
+    </section>
+
+    <!-- POSITION: wheel-odometry estimate (drifts; not GPS/odom yet) -->
+    <section class="panel">
+      <h2>Position <small>wheel-odometry estimate — drifts</small></h2>
+      <div class="odom">
+        <canvas id="trail" class="trail" width="200" height="200"></canvas>
+        <div class="readouts">
+          <div class="ro"><span class="k">x</span><span class="v" id="v-x">0.00</span><span class="u">m</span></div>
+          <div class="ro"><span class="k">y</span><span class="v" id="v-y">0.00</span><span class="u">m</span></div>
+          <div class="ro"><span class="k">heading</span><span class="v" id="v-hdg">0</span><span class="u">°</span></div>
+          <button id="reset-odom" class="btn">reset</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="./app.js"></script>
+</body>
+</html>

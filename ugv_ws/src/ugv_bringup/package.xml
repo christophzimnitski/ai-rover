@@ -16,6 +16,12 @@
   <!-- joy_supervisor node -->
   <exec_depend>rclpy</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
+  <!-- camera.launch.py (swappable camera seam) -->
+  <exec_depend>usb_cam</exec_depend>
+  <!-- webbridge.launch.py (dashboard transport layer) -->
+  <exec_depend>rosbridge_server</exec_depend>
+  <exec_depend>rosapi</exec_depend>
+  <exec_depend>web_video_server</exec_depend>
 
   <export>
     <build_type>ament_python</build_type>

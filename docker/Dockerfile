@@ -17,6 +17,12 @@ FROM ros:jazzy-ros-base@sha256:6513503d0b10e919fbe8134981d4f9d19b5c1f9b045b87a9f
 # Build deps for custom interfaces (ugv_msgs = ament_cmake + rosidl):
 #   build-essential + cmake      -> compile the generated message typesupport
 #   rosidl-default-generators    -> generate the Python/C bindings from msg/*.msg
+# Webapp + camera stack (see the camera/webbridge services in docker-compose.yml):
+#   usb-cam                      -> USB UVC camera -> /camera/image_raw (the swappable seam)
+#   web-video-server             -> serve ANY image topic as MJPEG over HTTP :8080
+#   rosbridge-suite              -> JSON/WebSocket ROS bridge :9090 for the roslibjs frontend
+#   image-transport-plugins      -> compressed image transports (lighter camera streaming)
+#   v4l-utils                    -> v4l2-ctl: inspect + live-tune camera controls (exposure, gain)
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3-serial \
         ros-jazzy-teleop-twist-keyboard \
@@ -26,6 +32,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
         cmake \
         ros-jazzy-rosidl-default-generators \
+        ros-jazzy-usb-cam \
+        ros-jazzy-web-video-server \
+        ros-jazzy-rosbridge-suite \
+        ros-jazzy-image-transport-plugins \
+        v4l-utils \
     && rm -rf /var/lib/apt/lists/*
 
 # The colcon workspace is bind-mounted here at runtime (see docker-compose.yml),
