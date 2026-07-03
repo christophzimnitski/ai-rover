@@ -41,11 +41,14 @@ heartbeat); IMU yaw is a relative heading, not compass truth (uncalibrated mag).
   tilt tests verified roll/pitch/yaw signs, tracking, and stability;
   `IMU_TRUSTED` flipped true. Yaw = relative heading only (uncalibrated mag);
   details in `docs/FIRMWARE.md`.
-- **0.2c Gate the IMU fusion against motor interference** — attitude is
-  currently trustworthy at rest ONLY: running motors make r/p/y swing wildly
-  (vibration → accel noise; motor magnetic fields → mag garbage that
-  cross-couples into all axes). Fix = sample gating + retune in the sketch,
-  app0-only reflash; full design in `docs/FIRMWARE.md` "Known limitation".
+- **0.2c Restore the IMU without hurting the control loop** — the 0.2b read
+  path was A/B-measured to stall the ESP32 loop (step worst-case 289–601 ms
+  vs 119 ms without it; suspected shared-I2C contention), so the board is
+  back on the IMU-absent build. Two fixes, one task: (1) move IMU I/O to a
+  core-0 task with a Wire mutex (bus shared with OLED + INA219), (2) gate
+  the fusion against motor vibration/magnetic interference. Acceptance:
+  `diag_latency` step worst-case < ~150 ms with IMU active + attitude sane
+  with motors running. Full design in `docs/FIRMWARE.md`.
 - **0.3 Ground-tune `wheel_trim`** on tile + carpet (trim_ki / trim_limit);
   re-measure with `scripts/diag_latency.py`.
 

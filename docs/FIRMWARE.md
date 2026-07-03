@@ -11,10 +11,11 @@ The reflash procedure that fixes the IMU is prepared in `docs/REFLASH.md`.
   (`firmware/ugv-rover.patch`, procedure in `docs/REFLASH.md`; updated same day
   with the ICM20948 read path, see the IMU section). The board now boots with
   correct UGV Rover geometry compiled in, WiFi off, our verified motor
-  direction, and a **working IMU**. `{"T":1001}` now carries
-  `L,R,r,p,y,temp,v` with live attitude. Direction, encoder scale (cmd 0.2 →
-  meas ≈ 0.2), and the board dead-man (default 3s window, driver arms 1s) were
-  verified wheels-off.
+  direction. `{"T":1001}` carries `L,R,r,p,y,temp,v`. Direction, encoder
+  scale (cmd 0.2 → meas ≈ 0.2), and the board dead-man (default 3s window,
+  driver arms 1s) were verified wheels-off. The IMU works (0.2b, see below)
+  but is **currently flashed OUT again** — its read path stalls the control
+  loop; 0.2c restores it properly.
   The pre-flash firmware (which predated the public repo entirely — its frame
   lacked `y`) is preserved in `firmware/stock-*.bin` (local only, gitignored).
 * The **boot mission is empty** and nothing sends `{"T":900,...}` (robot-type select)
@@ -79,6 +80,29 @@ ICM20948 read path (Adafruit driver, already a build dependency):
 * `{"T":126}` returns live `{"T":1002,...}` frames (mg / deg/s / µT);
   `{"T":127}` calibration remains a **no-op** (routine commented out at the
   source).
+
+### STATUS 2026-07-03: board is back on the IMU-ABSENT build until 0.2c
+
+The 0.2b read path was **convicted of stalling the control loop** by an A/B
+`diag_latency` measurement (same conditions, only firmware differing):
+
+|                    | 0.2 (IMU absent) | 0.2b (ICM reads @100Hz) |
+|--------------------|------------------|--------------------------|
+| cross-corr lag     | 85 ms            | 90–115 ms                |
+| step median        | 73 ms            | 83–155 ms                |
+| step worst-case    | **119 ms**       | **289–601 ms**           |
+
+The median cost is modest but the **tail stalls (up to ~600 ms, plus a 330 ms
+telemetry gap) freeze the control loop mid-drive** — felt as lag and drift.
+Suspected mechanism: I2C contention on the shared bus (ICM20948 + SSD1306 +
+INA219) escalating into Wire timeouts. So: `write_flash 0x10000` back to
+`rover-v095-imuabsent-app0-2026-07-02.bin` (kept locally with the ICM build),
+r/p/y are 0.0 again, temp = ESP32 internal, `IMU_TRUSTED` back to `false`.
+**0.2c must fix BOTH problems** — the motor-interference gating below AND
+moving IMU I/O off the control loop (dedicated FreeRTOS task on core 0 with a
+mutex around the Wire bus it shares with the OLED and INA219 in the main
+loop). Acceptance: `diag_latency` step worst-case back under ~150 ms with the
+IMU active, attitude sane with motors running.
 
 ### Known limitation: attitude is garbage while the MOTORS run (task 0.2c)
 
